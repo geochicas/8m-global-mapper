@@ -19,8 +19,6 @@ Próximos pasos:
 - geocodificación (`lat`, `lon`)
 - procesamiento automático de imágenes (`.jpg`)
 
----
-
 ## Estructura del proyecto
 
 ```text
