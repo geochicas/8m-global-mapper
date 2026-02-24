@@ -170,6 +170,28 @@ GitHub no guarda por defecto los outputs generados (CSV, imágenes, etc.).
 * Iterar (ajustar fuentes/keywords)
 * Importar CSV a uMap (en fases posteriores, ya con geocodificación e imágenes procesadas)
 
+## Flujo recomendado (práctico)
+
+Cada vez que vayas a trabajar:
+
+Si vos misma vas a pegar código nuevo del chat
+No hace falta git pull primero (salvo que alguien más haya tocado el repo).
+
+Si varias personas están tocando el repo
+Hacé esto siempre:
+```text
+git pull
+source .venv/bin/activate
+python main.py
+```
+
+Y cuando terminás:
+```text
+git add .
+git commit -m "Describe el cambio"
+git push
+```
+
 # Contribuir
 
 Si querés contribuir:
