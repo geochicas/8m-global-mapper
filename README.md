@@ -157,10 +157,10 @@ PowerShell bloquea la activación del entorno virtual (Windows)
 
 `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
 
-Veo archivos nuevos en data/, pero no aparecen en GitHub
-Es normal. Están ignorados por .gitignore.
+Veo archivos nuevos en `data/`, pero no aparecen en GitHub.
+Es normal. Están ignorados por `.gitignore`.
 
-GitHub no guarda outputs generados (CSV, imágenes, etc.) por defecto.
+GitHub no guarda por defecto los outputs generados (CSV, imágenes, etc.).
 
 ## Flujo recomendado de uso (MVP)
 
