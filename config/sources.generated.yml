@@ -1,0 +1,586 @@
+sources:
+- name: '{{https: (845)'
+  type: web
+  url: 'https://{{https:'
+- name: instagram.com (422)
+  type: web
+  url: https://instagram.com
+- name: facebook.com (371)
+  type: web
+  url: https://facebook.com
+- name: twitter.com (170)
+  type: web
+  url: https://twitter.com
+- name: sindicatodeestudiantes.net (56)
+  type: web
+  url: https://sindicatodeestudiantes.net
+- name: linktr.ee (35)
+  type: web
+  url: https://linktr.ee
+- name: fbid=817963237030677&set=pb.10006451024949 (27)
+  type: web
+  url: https://fbid=817963237030677&set=pb.10006451024949
+- name: 2.-2207520000 (27)
+  type: web
+  url: https://2.-2207520000
+- name: sindicatdestudiants.net (24)
+  type: web
+  url: https://sindicatdestudiants.net
+- name: drive.google.com (24)
+  type: web
+  url: https://drive.google.com
+- name: grevefeministe.fr (18)
+  type: web
+  url: https://grevefeministe.fr
+- name: de (14)
+  type: web
+  url: https://de
+- name: cgt.fr (10)
+  type: web
+  url: https://cgt.fr
+- name: ikaslesindikatua.net (8)
+  type: web
+  url: https://ikaslesindikatua.net
+- name: ayto-colmenarejo.com (8)
+  type: web
+  url: https://ayto-colmenarejo.com
+- name: hacialahuelgafeminista.org (8)
+  type: web
+  url: https://hacialahuelgafeminista.org
+- name: '{{http: (8)'
+  type: web
+  url: 'https://{{http:'
+- name: queerkastle.de (6)
+  type: web
+  url: https://queerkastle.de
+- name: meta.wikimedia.org (6)
+  type: web
+  url: https://meta.wikimedia.org
+- name: i (6)
+  type: web
+  url: https://i
+- name: unionswa.com.au (6)
+  type: web
+  url: https://unionswa.com.au
+- name: reclaimtheagenda.com (6)
+  type: web
+  url: https://reclaimtheagenda.com
+- name: tribunadesanluis.com.mx (6)
+  type: web
+  url: https://tribunadesanluis.com.mx
+- name: gruene-heidelberg.de (6)
+  type: web
+  url: https://gruene-heidelberg.de
+- name: weltfrauentag-bremen.de (6)
+  type: web
+  url: https://weltfrauentag-bremen.de
+- name: fb.me (5)
+  type: web
+  url: https://fb.me
+- name: bit.ly (5)
+  type: web
+  url: https://bit.ly
+- name: assemblea8m.cat (4)
+  type: web
+  url: https://assemblea8m.cat
+- name: pbs.twimg.com (4)
+  type: web
+  url: https://pbs.twimg.com
+- name: a (4)
+  type: web
+  url: https://a
+- name: psoetorrejon.es (4)
+  type: web
+  url: https://psoetorrejon.es
+- name: maz.zapopan.gob.mx (4)
+  type: web
+  url: https://maz.zapopan.gob.mx
+- name: es.wikipedia.org (4)
+  type: web
+  url: https://es.wikipedia.org
+- name: sevaarmarlagorda.wordpress.com (4)
+  type: web
+  url: https://sevaarmarlagorda.wordpress.com
+- name: ateneodemadrid.com (4)
+  type: web
+  url: https://ateneodemadrid.com
+- name: linkedin.com (4)
+  type: web
+  url: https://linkedin.com
+- name: cgtbarcelona.org (4)
+  type: web
+  url: https://cgtbarcelona.org
+- name: internationalwomenpower.com (4)
+  type: web
+  url: https://internationalwomenpower.com
+- name: igualandorealidades.wordpress.com (4)
+  type: web
+  url: https://igualandorealidades.wordpress.com
+- name: nudmtrieste.noblogs.org (4)
+  type: web
+  url: https://nudmtrieste.noblogs.org
+- name: ayto-caceres.es (4)
+  type: web
+  url: https://ayto-caceres.es
+- name: alumni.upv.es (4)
+  type: web
+  url: https://alumni.upv.es
+- name: amigashacker.club (4)
+  type: web
+  url: https://amigashacker.club
+- name: feministfightback.org.uk (4)
+  type: web
+  url: https://feministfightback.org.uk
+- name: hoxe.vigo.org (4)
+  type: web
+  url: https://hoxe.vigo.org
+- name: wikiesfera.org (4)
+  type: web
+  url: https://wikiesfera.org
+- name: intersindicalrm.org (4)
+  type: web
+  url: https://intersindicalrm.org
+- name: zaragoza.es (4)
+  type: web
+  url: https://zaragoza.es
+- name: ccpe.org.ar (4)
+  type: web
+  url: https://ccpe.org.ar
+- name: unamsa.edu (4)
+  type: web
+  url: https://unamsa.edu
+- name: uclga.org (4)
+  type: web
+  url: https://uclga.org
+- name: suteba_punta_indio (4)
+  type: web
+  url: https://suteba_punta_indio
+- name: punta (4)
+  type: web
+  url: https://punta
+- name: indio (4)
+  type: web
+  url: https://indio
+- name: i.imgur.com (4)
+  type: web
+  url: https://i.imgur.com
+- name: ccetegucigalpa.org (4)
+  type: web
+  url: https://ccetegucigalpa.org
+- name: coordinaciongenero.unam.mx (4)
+  type: web
+  url: https://coordinaciongenero.unam.mx
+- name: infobae.com (4)
+  type: web
+  url: https://infobae.com
+- name: bloc (3)
+  type: web
+  url: https://bloc
+- name: transfeminista, (3)
+  type: web
+  url: https://transfeminista,
+- name: anticapitalista (3)
+  type: web
+  url: https://anticapitalista
+- name: anticolonial, (3)
+  type: web
+  url: https://anticolonial,
+- name: contra (3)
+  type: web
+  url: https://contra
+- name: les (3)
+  type: web
+  url: https://les
+- name: presons (3)
+  type: web
+  url: https://presons
+- name: cies (3)
+  type: web
+  url: https://cies
+- name: com (3)
+  type: web
+  url: https://com
+- name: aparells (3)
+  type: web
+  url: https://aparells
+- name: dominació (3)
+  type: web
+  url: https://dominació
+- name: l’estat. (3)
+  type: web
+  url: https://l’estat.
+- name: qldunions.com (3)
+  type: web
+  url: https://qldunions.com
+- name: apheda.org.au (3)
+  type: web
+  url: https://apheda.org.au
+- name: weareunion.org.au (3)
+  type: web
+  url: https://weareunion.org.au
+- name: womeninprison.org.uk (3)
+  type: web
+  url: https://womeninprison.org.uk
+- name: rosaireland.nationbuilder.com (3)
+  type: web
+  url: https://rosaireland.nationbuilder.com
+- name: feminism-unlimited.org (3)
+  type: web
+  url: https://feminism-unlimited.org
+- name: don.linxx.net (3)
+  type: web
+  url: https://don.linxx.net
+- name: feminista.pt (3)
+  type: web
+  url: https://feminista.pt
+- name: especulativas.com (3)
+  type: web
+  url: https://especulativas.com
+- name: ellasdirigen.wordpress.com (3)
+  type: web
+  url: https://ellasdirigen.wordpress.com
+- name: rb.gy (3)
+  type: web
+  url: https://rb.gy
+- name: '@equalita_mx (3)'
+  type: web
+  url: https://@equalita_mx
+- name: hotosm.org (3)
+  type: web
+  url: https://hotosm.org
+- name: dpphuasco.dpp.gob.cl (3)
+  type: web
+  url: https://dpphuasco.dpp.gob.cl
+- name: futurosindigenas.org (3)
+  type: web
+  url: https://futurosindigenas.org
+- name: contingente (3)
+  type: web
+  url: https://contingente
+- name: mujeres (3)
+  type: web
+  url: https://mujeres
+- name: indígenas (3)
+  type: web
+  url: https://indígenas
+- name: roigcultura.cat (3)
+  type: web
+  url: https://roigcultura.cat
+- name: fembloc.cat (3)
+  type: web
+  url: https://fembloc.cat
+- name: tiranaxxl.al (3)
+  type: web
+  url: https://tiranaxxl.al
+- name: timeouttirana.al (3)
+  type: web
+  url: https://timeouttirana.al
+- name: nachhaltig-in-graz.at (3)
+  type: web
+  url: https://nachhaltig-in-graz.at
+- name: girlsintechlib.org (3)
+  type: web
+  url: https://girlsintechlib.org
+- name: boxgirlskenya.com (3)
+  type: web
+  url: https://boxgirlskenya.com
+- name: femmesjuristes.org (3)
+  type: web
+  url: https://femmesjuristes.org
+- name: comissio8mbdn (3)
+  type: web
+  url: https://comissio8mbdn
+- name: '@prende_luciernagas (3)'
+  type: web
+  url: https://@prende_luciernagas
+- name: canodrom.barcelona (2)
+  type: web
+  url: https://canodrom.barcelona
+- name: comunitat.canodrom.barcelona (2)
+  type: web
+  url: https://comunitat.canodrom.barcelona
+- name: afarambletadelclot.cat (2)
+  type: web
+  url: https://afarambletadelclot.cat
+- name: '@redlamorada.ac (2)'
+  type: web
+  url: https://@redlamorada.ac
+- name: docs.google.com (2)
+  type: web
+  url: https://docs.google.com
+- name: cntvalladolid.es (2)
+  type: web
+  url: https://cntvalladolid.es
+- name: geochicas.org; (2)
+  type: web
+  url: https://geochicas.org;
+- name: redmexicanadefeminismodedatos.org (2)
+  type: web
+  url: https://redmexicanadefeminismodedatos.org
+- name: geochicas.org (2)
+  type: web
+  url: https://geochicas.org
+- name: madrid.es (2)
+  type: web
+  url: https://madrid.es
+- name: eventos.upm.es (2)
+  type: web
+  url: https://eventos.upm.es
+- name: eventos.ucm.es (2)
+  type: web
+  url: https://eventos.ucm.es
+- name: womeningeospatial.org (2)
+  type: web
+  url: https://womeningeospatial.org
+- name: l-h.cat (2)
+  type: web
+  url: https://l-h.cat
+- name: lh-on.cat (2)
+  type: web
+  url: https://lh-on.cat
+- name: mundosur.org (2)
+  type: web
+  url: https://mundosur.org
+- name: nonunadimeno.wordpress.com (2)
+  type: web
+  url: https://nonunadimeno.wordpress.com
+- name: organizacionesfeministasteruel.blogspot.com (2)
+  type: web
+  url: https://organizacionesfeministasteruel.blogspot.com
+- name: shutitdown4palestine.org (2)
+  type: web
+  url: https://shutitdown4palestine.org
+- name: esquel.gov.ar (2)
+  type: web
+  url: https://esquel.gov.ar
+- name: surversiva (2)
+  type: web
+  url: https://surversiva
+- name: lavozdelasierra.es (2)
+  type: web
+  url: https://lavozdelasierra.es
+- name: '@colectivateatrallacaldera (2)'
+  type: web
+  url: https://@colectivateatrallacaldera
+- name: corporaciontecoc.org (2)
+  type: web
+  url: https://corporaciontecoc.org
+- name: aplusalliance.org (2)
+  type: web
+  url: https://aplusalliance.org
+- name: us02web.zoom.us (2)
+  type: web
+  url: https://us02web.zoom.us
+- name: asambleatransfeministademujeresydisidencias@gmail.com (2)
+  type: web
+  url: https://asambleatransfeministademujeresydisidencias@gmail.com
+- name: nonunadimenomilanoblog.wordpress.com (2)
+  type: web
+  url: https://nonunadimenomilanoblog.wordpress.com
+- name: manifestación (2)
+  type: web
+  url: https://manifestación
+- name: pcw.gov.ph (2)
+  type: web
+  url: https://pcw.gov.ph
+- name: asti.dost.gov.ph (2)
+  type: web
+  url: https://asti.dost.gov.ph
+- name: face. (2)
+  type: web
+  url: https://face.
+- name: familiares (2)
+  type: web
+  url: https://familiares
+- name: caminando (2)
+  type: web
+  url: https://caminando
+- name: por (2)
+  type: web
+  url: https://por
+- name: justicia (2)
+  type: web
+  url: https://justicia
+- name: <iframe (2)
+  type: web
+  url: https://<iframe
+- name: 'src="https: (2)'
+  type: web
+  url: 'https://src="https:'
+- name: width="500" (2)
+  type: web
+  url: https://width="500"
+- name: height="551" (2)
+  type: web
+  url: https://height="551"
+- name: style="border:none;overflow:hidden" (2)
+  type: web
+  url: https://style="border:none;overflow:hidden"
+- name: scrolling="no" (2)
+  type: web
+  url: https://scrolling="no"
+- name: frameborder="0" (2)
+  type: web
+  url: https://frameborder="0"
+- name: allowfullscreen="true" (2)
+  type: web
+  url: https://allowfullscreen="true"
+- name: allow="autoplay; (2)
+  type: web
+  url: https://allow="autoplay;
+- name: clipboard-write; (2)
+  type: web
+  url: https://clipboard-write;
+- name: encrypted-media; (2)
+  type: web
+  url: https://encrypted-media;
+- name: picture-in-picture; (2)
+  type: web
+  url: https://picture-in-picture;
+- name: web-share">< (2)
+  type: web
+  url: https://web-share"><
+- name: womensmarch.com (2)
+  type: web
+  url: https://womensmarch.com
+- name: act.womensmarch.com (2)
+  type: web
+  url: https://act.womensmarch.com
+- name: asiapacific.unwomen.org (2)
+  type: web
+  url: https://asiapacific.unwomen.org
+- name: unescap.org (2)
+  type: web
+  url: https://unescap.org
+- name: meetup.com (2)
+  type: web
+  url: https://meetup.com
+- name: briega.org (2)
+  type: web
+  url: https://briega.org
+- name: backtoeco.com (2)
+  type: web
+  url: https://backtoeco.com
+- name: coordinadora (2)
+  type: web
+  url: https://coordinadora
+- name: colectivos (2)
+  type: web
+  url: https://colectivos
+- name: feministas (2)
+  type: web
+  url: https://feministas
+- name: almería (2)
+  type: web
+  url: https://almería
+- name: castagninomacro.org (2)
+  type: web
+  url: https://castagninomacro.org
+- name: morrassocioterritoriales.org (2)
+  type: web
+  url: https://morrassocioterritoriales.org
+- name: casalprospe.org (2)
+  type: web
+  url: https://casalprospe.org
+- name: womensmarchtokyo.wordpress.com (2)
+  type: web
+  url: https://womensmarchtokyo.wordpress.com
+- name: wikiinafrica.org (2)
+  type: web
+  url: https://wikiinafrica.org
+- name: cotia.sp.gov.br (2)
+  type: web
+  url: https://cotia.sp.gov.br
+- name: araras.sp.gov.br (2)
+  type: web
+  url: https://araras.sp.gov.br
+- name: esportes.sp.gov.br (2)
+  type: web
+  url: https://esportes.sp.gov.br
+- name: esportividade.com.br (2)
+  type: web
+  url: https://esportividade.com.br
+- name: nuolhar.com (2)
+  type: web
+  url: https://nuolhar.com
+- name: topensandoemviajar.com (2)
+  type: web
+  url: https://topensandoemviajar.com
+- name: uece.br (2)
+  type: web
+  url: https://uece.br
+- name: eventos.uece.br (2)
+  type: web
+  url: https://eventos.uece.br
+- name: pirenopolis.tur.br (2)
+  type: web
+  url: https://pirenopolis.tur.br
+- name: wikidata.org (2)
+  type: web
+  url: https://wikidata.org
+- name: clisi.org (2)
+  type: web
+  url: https://clisi.org
+- name: assemblea (1)
+  type: web
+  url: https://assemblea
+- name: ¡nos (1)
+  type: web
+  url: https://¡nos
+- name: vemos (1)
+  type: web
+  url: https://vemos
+- name: en (1)
+  type: web
+  url: https://en
+- name: las (1)
+  type: web
+  url: https://las
+- name: calles! (1)
+  type: web
+  url: https://calles!
+- name: golpe (1)
+  type: web
+  url: https://golpe
+- name: tacón, (1)
+  type: web
+  url: https://tacón,
+- name: dando (1)
+  type: web
+  url: https://dando
+- name: tira (1)
+  type: web
+  url: https://tira
+- name: asamblea (1)
+  type: web
+  url: https://asamblea
+- name: 8m (1)
+  type: web
+  url: https://8m
+- name: segovia (1)
+  type: web
+  url: https://segovia
+- name: umegava.cat (1)
+  type: web
+  url: https://umegava.cat
+- name: castellersgava.wordpress.com (1)
+  type: web
+  url: https://castellersgava.wordpress.com
+- name: storstockholm.vansterpartiet.se (1)
+  type: web
+  url: https://storstockholm.vansterpartiet.se
+- name: youtube.com (1)
+  type: web
+  url: https://youtube.com
+- name: nonunadimenoverona.wordpress.com (1)
+  type: web
+  url: https://nonunadimenoverona.wordpress.com
+- name: sindipetroprsc.org.br (1)
+  type: web
+  url: https://sindipetroprsc.org.br
+- name: jornalfaixadefronteira.com.br (1)
+  type: web
+  url: https://jornalfaixadefronteira.com.br
+- name: radioelcandil.org (1)
+  type: web
+  url: https://radioelcandil.org
