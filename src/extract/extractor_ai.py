@@ -52,12 +52,58 @@ def _parse_iso_date(s):
     m = re.match(r"^(\d{4}-\d{2}-\d{2})", s)
     return m.group(1) if m else ""
 
+from dateparser.search import search_dates
+
+EVENT_KEYWORDS = [
+    "marcha", "manifestación", "concentración",
+    "convoca", "convocatoria",
+    "8m", "8 marzo", "8 mars", "8 march",
+    "plaza", "parque"
+]
+
 def extract_event_date(parsed):
-    # 1) schema.org Event (JSON-LD)
-    for ev in (parsed.get("jsonld_events") or []):
-        d = _parse_iso_date(ev.get("startDate", ""))
-        if d:
-            return d
+    text = parsed.get("text", "") or ""
+    lines = text.split("\n")
+
+    candidate_lines = []
+
+    # 1️⃣ buscar líneas con palabras del evento
+    for line in lines:
+        low = line.lower()
+        if any(k in low for k in EVENT_KEYWORDS):
+            candidate_lines.append(line)
+
+    # 2️⃣ si no encontró nada, fallback al texto completo
+    if not candidate_lines:
+        candidate_lines = [text]
+
+    settings = {
+        "DATE_ORDER": "DMY",
+        "PREFER_DAY_OF_MONTH": "first",
+        "STRICT_PARSING": False,
+    }
+
+    for chunk in candidate_lines:
+        hits = search_dates(
+            chunk,
+            languages=["es", "en", "pt", "fr"],
+            settings=settings
+        )
+        if hits:
+            for frag, dt in hits:
+                if dt:
+                    # priorizamos marzo
+                    if dt.month == 3:
+                        return dt.strftime("%Y-%m-%d")
+
+    # fallback: cualquier fecha encontrada
+    hits = search_dates(text, languages=["es","en","pt","fr"], settings=settings)
+    if hits:
+        for frag, dt in hits:
+            if dt:
+                return dt.strftime("%Y-%m-%d")
+
+    return ""
 
     # 2) texto visible (multilingüe)
     blob = (parsed.get("title","") + "\n" + parsed.get("text","")).strip()
