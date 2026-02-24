@@ -4,8 +4,6 @@ Pipeline para recolectar, estructurar y exportar actividades del 8M (marchas, co
 
 La idea es automatizar la recolección de datos desde fuentes web públicas (medios, sitios, publicaciones en línea), normalizar los datos y generar una base de datos lista para mapear.
 
----
-
 ## Estado del proyecto
 
 **MVP en construcción**
