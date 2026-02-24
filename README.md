@@ -140,7 +140,7 @@ pip install -r requirements.txt
 python: command not found (Mac/Linux)
 ```
 
-#### Probá con:
+Probá con:
 ```text
 python3 main.py
 FileNotFoundError: config/keywords.yml
