@@ -1,22 +1,37 @@
 # src/collect/web_search.py
 import yaml
 
-def search_seed_urls(sources_config_path="config/sources.yml"):
-    with open(sources_config_path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+def load_yaml(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
-    urls = []
-    for src in cfg.get("sources", []):
-        url = src.get("url", "").strip()
+def load_sources_and_keywords(
+    sources_config_path="config/sources.yml",
+    keywords_config_path="config/keywords.yml"
+):
+    sources_cfg = load_yaml(sources_config_path)
+    keywords_cfg = load_yaml(keywords_config_path)
+
+    seed_urls = []
+    for src in sources_cfg.get("sources", []):
+        url = (src.get("url") or "").strip()
         if url:
-            urls.append(url)
+            seed_urls.append(url)
 
-    # quitar duplicados conservando orden
-    seen = set()
-    unique_urls = []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            unique_urls.append(u)
+    # Flatten keywords (idiomas + términos)
+    keywords = []
+    for _, kws in keywords_cfg.get("languages", {}).items():
+        keywords.extend(kws or [])
+    keywords.extend(keywords_cfg.get("event_terms", []) or [])
 
-    return unique_urls
+    # dedupe conservando orden
+    def unique_keep_order(items):
+        seen = set()
+        out = []
+        for i in items:
+            if i not in seen:
+                seen.add(i)
+                out.append(i)
+        return out
+
+    return unique_keep_order(seed_urls), unique_keep_order(keywords)
