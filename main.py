@@ -5,6 +5,8 @@ from src.collect.discover_links import discover_candidate_links
 from src.collect.web_fetch import fetch_page
 from src.parse.html_parser import parse_page
 from src.extract.extractor_ai import extract_event_fields
+from src.geocode.geocoder import geocode_event
+from src.media.image_processor import process_image
 from src.export.to_csv import export_csv
 
 EXPORT_PATH = "data/exports/mapa_8m_master.csv"
@@ -35,7 +37,6 @@ def main():
     print(f"🌐 Fuentes semilla: {len(seed_urls)}")
     print(f"🔎 Keywords cargadas: {len(keywords)}")
 
-    # 1) Descubrir links candidatos desde fuentes semilla
     candidate_links = []
     for seed in seed_urls:
         try:
@@ -48,22 +49,27 @@ def main():
     candidate_links = dedupe_keep_order(candidate_links)
     print(f"\n🧭 Total links candidatos únicos: {len(candidate_links)}")
 
-    # 2) Procesar páginas candidatas
     records = []
-    for url in candidate_links:
+    for idx, url in enumerate(candidate_links, start=1):
         try:
             html = fetch_page(url)
             parsed = parse_page(url, html)
             event = extract_event_fields(parsed)
-            if event:
-                records.append(event)
-                print(f"✅ Detectado: {url}")
-            else:
+            if not event:
                 print(f"— Sin match: {url}")
+                continue
+
+            # Geocodificación (si encontró algo ubicable)
+            event = geocode_event(event)
+
+            # Imagen -> .jpg local
+            event = process_image(event, index=idx)
+
+            records.append(event)
+            print(f"✅ Detectado: {url}")
         except Exception as e:
             print(f"[WARN] Error procesando {url}: {e}")
 
-    # 3) Exportar
     export_csv(records, EXPORT_PATH)
     print(f"\n📄 CSV generado: {EXPORT_PATH}")
     print(f"🧾 Registros exportados: {len(records)}")
