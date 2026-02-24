@@ -1,0 +1,20 @@
+sources:
+  - name: "ONU Mujeres"
+    type: "web"
+    url: "https://www.unwomen.org"
+
+  - name: "Amnesty International"
+    type: "web"
+    url: "https://www.amnesty.org"
+
+  - name: "Open Global Rights"
+    type: "web"
+    url: "https://www.openglobalrights.org"
+
+  - name: "CIVICUS"
+    type: "web"
+    url: "https://www.civicus.org"
+
+  - name: "Regional Feminist Network Example"
+    type: "web"
+    url: "https://example.org"
