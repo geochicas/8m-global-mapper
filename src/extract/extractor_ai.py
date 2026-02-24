@@ -1,17 +1,40 @@
 # src/extract/extractor_ai.py
-def extract_event_fields(parsed):
-    text_blob = (parsed.get("title", "") + "\n" + parsed.get("text", "")).lower()
+import re
 
-    # Filtro muy básico (luego lo mejoramos)
-    triggers = ["8m", "8 marzo", "women", "mujer", "femin", "international women's day"]
-    if not any(t in text_blob for t in triggers):
+TRIGGERS = [
+    "8m", "8 marzo", "8 mars", "8 march",
+    "women", "womens", "woman",
+    "mujer", "mujeres",
+    "femin", "international women's day",
+    "dia internacional da mulher",
+    "journée internationale des droits des femmes"
+]
+
+def clean_text(s, max_len=280):
+    s = re.sub(r"\s+", " ", (s or "")).strip()
+    return s[:max_len]
+
+def extract_event_fields(parsed):
+    title = parsed.get("title", "") or ""
+    text = parsed.get("text", "") or ""
+    blob = (title + "\n" + text).lower()
+
+    # Filtro base
+    if not any(t in blob for t in TRIGGERS):
         return None
 
-    # Registro mínimo
+    # Descripción breve
+    desc = clean_text(text, max_len=280)
+
+    # Primer imagen si existe
+    img = ""
+    if parsed.get("images"):
+        img = parsed["images"][0]
+
     return {
         "colectiva": "",
-        "convocatoria": parsed.get("title", "")[:180],
-        "descripcion": (parsed.get("text", "")[:280]).strip(),
+        "convocatoria": clean_text(title, max_len=180),
+        "descripcion": desc,
         "fecha": "",
         "hora": "",
         "pais": "",
@@ -20,7 +43,7 @@ def extract_event_fields(parsed):
         "direccion": "",
         "lat": "",
         "lon": "",
-        "imagen": parsed.get("images", [""])[0] if parsed.get("images") else "",
+        "imagen": img,
         "cta_url": parsed.get("url", ""),
         "sitio_web_colectiva": "",
         "trans_incluyente": "",
