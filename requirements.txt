@@ -1,1 +1,6 @@
-
+requests
+beautifulsoup4
+lxml
+pillow
+python-dateutil
+pandas
