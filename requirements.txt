@@ -4,3 +4,4 @@ lxml
 pillow
 python-dateutil
 pandas
+PyYAML
