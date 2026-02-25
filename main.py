@@ -211,6 +211,7 @@ def master_columns() -> list[str]:
         "fuente_tipo",
         "confianza_extraccion",
         "precision_ubicacion",
+        "score_relevancia",	
     ]
 
 

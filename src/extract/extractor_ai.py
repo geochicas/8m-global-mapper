@@ -4,24 +4,46 @@ from typing import Any, Dict, Optional
 from dateparser.search import search_dates
 
 
-TRIGGERS = [
-    "8m", "8 marzo", "8 de marzo", "8 mars", "8 march", "8 mar",
-    "women", "womens", "woman", "women’s", "women's",
-    "mujer", "mujeres", "femin", "feminista",
-    "international women's day", "international womens day", "iwd",
-    "dia internacional da mulher", "dia internacional de la mujer",
-    "journée internationale des droits des femmes",
-    "journee internationale des droits des femmes",
-    "huelga feminista", "paro de mujeres", "paro internacional de mujeres",
-    "marcha", "manifestación", "manifestacion",
-    "movilización", "movilizacion",
+# =========================
+# 8M ANCHORS (obligatorio: al menos uno)
+# =========================
+ANCHORS_8M = [
+    r"\b8\s*(de\s*)?(marzo|mar|mars|march)\b",
+    r"\b8m\b",
+    r"\biwd\b",
+    r"\binternational\s+women['’]?s\s+day\b",
+    r"\bd[ií]a\s+internacional\s+de\s+la\s+mujer\b",
+    r"\bdia\s+internacional\s+da\s+mulher\b",
+    r"\bjourn[ée]e\s+internationale\s+des\s+droits\s+des\s+femmes\b",
 ]
 
+ANCHORS_8M_RE = re.compile("|".join(ANCHORS_8M), flags=re.IGNORECASE)
 
+
+# =========================
+# EVENT INTENT / ACTIVITY SIGNALS
+# (necesitamos al menos 2 señales)
+# =========================
+EVENT_WORDS = [
+    "evento", "actividad", "agenda", "programa", "calendario",
+    "convoca", "convocatoria", "participa", "acompáñanos", "acompananos",
+    "inscripción", "inscripcion", "registro", "regístrate", "registrate",
+    "entrada", "cupos", "aforo", "gratuito", "gratis",
+    "taller", "seminario", "conferencia", "conversatorio", "charla",
+    "encuentro", "mesa", "panel", "cineforo", "proyección", "proyeccion",
+    "marcha", "manifestación", "manifestacion", "movilización", "movilizacion",
+    "concentración", "concentracion", "parque", "plaza", "auditorio", "sala",
+    "lugar", "ubicación", "ubicacion", "dirección", "direccion",
+]
+
+EVENT_WORDS_LOWER = set(w.lower() for w in EVENT_WORDS)
+
+
+# Horas tipo 5pm, 17:30, 17h, 5:30 pm
 HOUR_PATTERNS = [
-    r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
-    r"\b([01]?\d|2[0-3])\s?h\b",
-    r"\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s?(am|pm)\b",
+    r"\b([01]?\d|2[0-3]):([0-5]\d)\b",                 # 17:30
+    r"\b([01]?\d|2[0-3])\s?h\b",                       # 17h
+    r"\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s?(am|pm)\b",  # 5pm / 5:30 pm
 ]
 
 
@@ -55,12 +77,8 @@ def extract_hour(text: str) -> str:
     return ""
 
 
-def looks_like_event(text: str, title: str = "") -> bool:
-    blob = (title + "\n" + (text or "")).lower()
-    return any(t in blob for t in TRIGGERS)
-
-
 def _strip_absurd_years(chunk: str) -> str:
+    # elimina años absurdos (3000+) que rompen dateparser
     return re.sub(r"\b(3[0-9]{3}|[4-9][0-9]{3,})\b", " ", chunk)
 
 
@@ -69,19 +87,7 @@ def extract_event_date_contextual(text: str, title: str = "") -> str:
     if not blob:
         return ""
 
-    chunk = blob[:1500]
-    chunk = _strip_absurd_years(chunk)
-
-    # 🔥 PRIORIDAD: detectar explícitamente 8 de marzo
-    explicit_8m = re.search(
-        r"(8\s*(de)?\s*(marzo|mar|mars|march))",
-        chunk.lower()
-    )
-    if explicit_8m:
-        # Asumimos año actual si no está claro
-        import datetime
-        year = datetime.datetime.now().year
-        return f"{year}-03-08"
+    chunk = _strip_absurd_years(blob[:1600])
 
     settings = {
         "PREFER_DATES_FROM": "future",
@@ -111,12 +117,97 @@ def extract_event_date_contextual(text: str, title: str = "") -> str:
     return ""
 
 
+def has_8m_anchor(title: str, text: str) -> bool:
+    blob = (title + "\n" + (text or "")).strip()
+    return bool(ANCHORS_8M_RE.search(blob))
+
+
+def count_activity_signals(title: str, text: str) -> int:
+    """
+    Cuenta señales de que es una ACTIVIDAD (no solo contenido temático):
+    - menciona palabras típicas de agenda/registro/lugar/actividad
+    - tiene hora
+    - tiene fecha
+    """
+    blob = (title + "\n" + (text or "")).lower()
+
+    # 1) palabras
+    word_hits = 0
+    # contamos por presencia (no frecuencia) para evitar inflar por repetición
+    for w in EVENT_WORDS_LOWER:
+        if w in blob:
+            word_hits += 1
+
+    # 2) hora
+    hour_hit = 1 if extract_hour(blob) else 0
+
+    # 3) fecha (light): presencia de patrones típicos (sin parsear aún)
+    date_hint = 1 if re.search(r"\b(\d{1,2}\s*(de)?\s*(marzo|mar|mars|march)|\d{4}-\d{2}-\d{2})\b", blob) else 0
+
+    # Señales: al menos 2 entre (palabras, hora, date_hint)
+    signals = 0
+    if word_hits >= 2:
+        signals += 1
+    if hour_hit:
+        signals += 1
+    if date_hint:
+        signals += 1
+
+    return signals
+
+
+def proximity_bonus(title: str, text: str) -> int:
+    """
+    Bonus si el ancla 8M aparece cerca de palabras de evento (típico de convocatorias).
+    """
+    blob = (title + "\n" + (text or "")).lower()
+    # ventana de 120 caracteres
+    if re.search(r"(8m|8\s*(de\s*)?(marzo|mar|mars|march)).{0,120}(evento|actividad|agenda|programa|convoc|taller|seminario|conferencia|marcha|manifest|inscrip|registro)", blob):
+        return 2
+    return 0
+
+
+def relevance_score(title: str, text: str) -> int:
+    """
+    Score explicable:
+    - +6 si hay ancla 8M
+    - +3 si hay 2+ señales de actividad
+    - +2 si hay proximidad ancla-evento
+    - +1 si hay hora
+    - +1 si hay fecha parseable
+    """
+    score = 0
+
+    anchor = has_8m_anchor(title, text)
+    if anchor:
+        score += 6
+    else:
+        return 0  # sin ancla 8M NO es evento 8M (evita ruido masivo)
+
+    signals = count_activity_signals(title, text)
+    score += signals * 3
+
+    score += proximity_bonus(title, text)
+
+    if extract_hour(text):
+        score += 1
+
+    if extract_event_date_contextual(text, title):
+        score += 1
+
+    return score
+
+
 def extract_event_fields(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    url = parsed.get("url", "")
+    url = parsed.get("url", "") or ""
     title = parsed.get("title", "") or ""
     text = parsed.get("text", "") or ""
 
-    if not looks_like_event(text, title):
+    score = relevance_score(title, text)
+
+    # Umbral recomendado: 9.
+    # - requiere ancla (6) + actividad (>=3) y algo más.
+    if score < 9:
         return None
 
     imgs = parsed.get("images") or []
@@ -148,5 +239,6 @@ def extract_event_fields(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "trans_incluyente": "",
         "confianza_extraccion": "media",
         "precision_ubicacion": "",
+        "score_relevancia": score,   # 👈 útil para auditar "por qué entró"
     }
     return out
