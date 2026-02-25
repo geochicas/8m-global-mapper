@@ -25,10 +25,11 @@ CACHE_DIR = "data/raw/html_cache"
 IMAGES_DIR = "data/images"
 
 MAX_SEEDS = 50
-MAX_PAGES_PER_SEED = 60
-MAX_TOTAL_CANDIDATES = 1500
+MAX_PAGES_PER_SEED = 80
+MAX_TOTAL_CANDIDATES = 2000
+
 FETCH_TIMEOUT = 20
-DELAY_BETWEEN_REQUESTS = 0.2  # cortesía básica
+DELAY_BETWEEN_REQUESTS = 0.2
 
 USER_AGENT = "geochicas-8m-global-mapper/1.0 (public observatory)"
 
@@ -43,8 +44,11 @@ def ensure_dirs():
 
 
 def load_yaml(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
 
 
 def normalize(s):
@@ -52,33 +56,63 @@ def normalize(s):
 
 
 def safe_filename_from_url(url: str) -> str:
-    # nombre estable para cache
     import hashlib
     h = hashlib.sha1(url.encode("utf-8")).hexdigest()
     return f"{h}.html"
 
 
 def read_keywords() -> list[str]:
+    """
+    Acepta keywords.yml en varios formatos comunes:
+      - lista directa: ["8M", "8 de marzo"]
+      - dict con keys conocidas: {keywords:[...]} o {terms:[...]}
+      - dict con listas por idioma: {es:[...], en:[...]}
+      - dict con cualquier lista (fallback)
+    """
     y = load_yaml(KEYWORDS_YML)
-    # acepta varias estructuras
-    if isinstance(y, dict):
-        for k in ["keywords", "terms", "list"]:
-            if k in y and isinstance(y[k], list):
-                return [str(x).strip() for x in y[k] if str(x).strip()]
+
+    # Caso 1: lista directa
     if isinstance(y, list):
         return [str(x).strip() for x in y if str(x).strip()]
+
+    # Caso 2: dict
+    if isinstance(y, dict):
+        # prioridades conocidas
+        for k in ["keywords", "terms", "list", "palabras_clave", "tags"]:
+            if k in y and isinstance(y[k], list):
+                return [str(x).strip() for x in y[k] if str(x).strip()]
+
+        # si hay listas por idioma o por categoría, juntarlas
+        collected = []
+        for _, v in y.items():
+            if isinstance(v, list):
+                collected.extend([str(x).strip() for x in v if str(x).strip()])
+        # de-dupe
+        out = []
+        seen = set()
+        for k in collected:
+            if k.lower() not in seen:
+                seen.add(k.lower())
+                out.append(k)
+        return out
+
     return []
 
 
 def read_seeds() -> list[str]:
+    """
+    Acepta sources.yml en formatos:
+      - {seeds:[...]}
+      - {sources:[ {name:..., url:...}, ... ]} o {sources:[...strings...]}
+      - lista directa
+    """
     y = load_yaml(SOURCES_YML)
     seeds = []
-    # estructuras comunes
+
     if isinstance(y, dict):
         if "seeds" in y and isinstance(y["seeds"], list):
             seeds = y["seeds"]
         elif "sources" in y and isinstance(y["sources"], list):
-            # permitir lista de dicts {name,url}
             for it in y["sources"]:
                 if isinstance(it, str):
                     seeds.append(it)
@@ -86,8 +120,9 @@ def read_seeds() -> list[str]:
                     seeds.append(it["url"])
     elif isinstance(y, list):
         seeds = y
+
     seeds = [str(s).strip() for s in seeds if str(s).strip()]
-    # dedupe manteniendo orden
+
     out = []
     seen = set()
     for s in seeds:
@@ -131,29 +166,19 @@ def fetch_url(url: str, use_cache: bool = True) -> str | None:
 
 
 def extract_links(base_url: str, html: str) -> list[str]:
-    # extraer links con regex para evitar dependencias extra
-    # (si ya usás BeautifulSoup en html_parser, también está OK)
     links = set()
     for m in re.finditer(r'href=["\'](.*?)["\']', html, flags=re.IGNORECASE):
-        href = m.group(1).strip()
+        href = (m.group(1) or "").strip()
         if not href:
             continue
         if href.startswith("#"):
             continue
-        if href.startswith("mailto:") or href.startswith("tel:"):
-            continue
-        if href.startswith("javascript:"):
+        if href.startswith(("mailto:", "tel:", "javascript:")):
             continue
         full = urljoin(base_url, href)
-        # solo http(s)
-        if full.startswith("http://") or full.startswith("https://"):
+        if full.startswith(("http://", "https://")):
             links.add(full)
     return list(links)
-
-
-def looks_relevant(url: str, keywords: list[str]) -> bool:
-    u = url.lower()
-    return any(k.lower() in u for k in keywords)
 
 
 def same_domain(a: str, b: str) -> bool:
@@ -163,14 +188,19 @@ def same_domain(a: str, b: str) -> bool:
         return False
 
 
+def looks_relevant(url: str, keywords: list[str]) -> bool:
+    if not keywords:
+        return True  # si no hay keywords, no filtrar por URL
+    u = url.lower()
+    return any(k.lower() in u for k in keywords)
+
+
 def build_geocode_query(ev: dict) -> str:
     parts = []
-    # preferimos dirección/localización exacta, luego ciudad+pais
     for key in ["direccion", "localizacion_exacta", "ciudad", "pais"]:
         v = normalize(ev.get(key, ""))
         if v:
             parts.append(v)
-    # quitar duplicados consecutivos
     cleaned = []
     for p in parts:
         if not cleaned or cleaned[-1].lower() != p.lower():
@@ -191,7 +221,7 @@ def master_columns() -> list[str]:
         "direccion",
         "lat",
         "lon",
-        "imagen",              # {{hash.jpg}}
+        "imagen",              # {{hash.jpg}} después de descargar
         "imagen_archivo",      # hash.jpg (trazabilidad)
         "cta_url",
         "sitio_web_colectiva",
@@ -204,7 +234,7 @@ def master_columns() -> list[str]:
 
 
 # =========================
-# MAIN PIPELINE
+# MAIN
 # =========================
 def main():
     ensure_dirs()
@@ -215,7 +245,6 @@ def main():
     print(f"🌐 Seeds: {len(seeds)}")
     print(f"🔎 Keywords: {len(keywords)}")
 
-    # 1) discovery: crawl básico por seed
     candidates = []
     seen = set()
 
@@ -227,14 +256,13 @@ def main():
 
         links = extract_links(seed, html)
 
-        # filtrar: mismos dominios primero, y si contiene keywords en URL
         picked = []
         for link in links:
             if link in seen:
                 continue
             if not same_domain(seed, link):
                 continue
-            if keywords and not looks_relevant(link, keywords):
+            if not looks_relevant(link, keywords):
                 continue
             seen.add(link)
             picked.append(link)
@@ -247,7 +275,6 @@ def main():
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
-    # 2) extracción
     geocoder = Geocoder()
     records = []
 
@@ -261,12 +288,11 @@ def main():
         if not ev:
             continue
 
-        # fuente
         ev["fuente_url"] = url
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
 
-        # 3) imágenes: descargar+convertir y guardar como {{hash.jpg}}
+        # Imagen: bajar+convertir y guardar como {{hash.jpg}}
         img_url = normalize(ev.get("imagen", ""))
         if img_url and not (img_url.startswith("{{") and img_url.endswith("}}")):
             res = download_and_convert_to_jpg(img_url, out_dir=IMAGES_DIR)
@@ -279,7 +305,7 @@ def main():
         else:
             ev["imagen_archivo"] = ""
 
-        # 4) geocoding: si no hay lat/lon
+        # Geocode si falta lat/lon
         lat = normalize(ev.get("lat", ""))
         lon = normalize(ev.get("lon", ""))
         if not lat or not lon:
@@ -298,13 +324,11 @@ def main():
 
     geocoder.close()
 
-    # 5) export master CSV
     cols = master_columns()
     with open(EXPORT_MASTER, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for r in records:
-            # asegurar claves
             for c in cols:
                 if c not in r:
                     r[c] = ""
