@@ -16,8 +16,7 @@ from src.extract.extractor_ai import extract_event_fields
 # =========================
 # PIPELINE PROFILE
 # =========================
-FAST_MODE = True  # ✅ mantener True (local + Actions)
-
+FAST_MODE = True  # mantenelo True: estable
 
 # =========================
 # PATHS / CONFIG FILES
@@ -26,7 +25,6 @@ BASE_SOURCES_YML = "config/sources.yml"
 GENERATED_SOURCES_YML = "config/sources.generated.yml"
 KEYWORDS_YML = "config/keywords.yml"
 
-# CSV histórico (si existe, se usa para generar priority_urls)
 MASTER_CSV_PATH = "data/raw/convocatorias_2019_2025.csv"
 
 EXPORT_MASTER = "data/exports/mapa_8m_global_master.csv"
@@ -35,20 +33,18 @@ EXPORT_UMAP = "data/exports/mapa_8m_global_umap.csv"
 CACHE_DIR = "data/raw/html_cache"
 IMAGES_DIR = "data/images"
 
-# GitHub Pages base (para renderizar imágenes en popup_html si están publicadas)
+# Para popup HTML (si usás {{archivo.jpg}} en el futuro)
 PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 
+# =========================
+# SOURCES GENERATION
+# =========================
+GENERATE_SOURCES_IF_MISSING = True
+REFRESH_SOURCES_EVERY_RUN = False
+MAX_PRIORITY_URLS_FROM_CSV = 1200
 
 # =========================
-# GENERATION BEHAVIOR
-# =========================
-GENERATE_SOURCES_IF_MISSING = True     # crea sources.generated.yml si no existe
-REFRESH_SOURCES_EVERY_RUN = False     # si True, lo regenera siempre
-MAX_PRIORITY_URLS_FROM_CSV = 1200     # cuántas URLs del CSV histórico usar como priority
-
-
-# =========================
-# RUNTIME LIMITS (FAST_MODE)
+# RUNTIME LIMITS
 # =========================
 MAX_TOTAL_CANDIDATES = 400 if FAST_MODE else 2500
 MAX_PRIORITY = 600 if FAST_MODE else 1200
@@ -59,15 +55,23 @@ TIMEOUT = (6, 14)  # (connect, read)
 DELAY_BETWEEN_REQUESTS = 0.03 if FAST_MODE else 0.06
 USER_AGENT = "geochicas-8m-global-mapper/1.0 (public observatory)"
 
-# Watchdog: si una URL tarda demasiado “en total”, la saltamos
 MAX_SECONDS_PER_URL = 18 if FAST_MODE else 35
 
+# =========================
+# GEOCODING (Nominatim)
+# =========================
+GEOCODING_ENABLED = True  # ✅ esto es lo que te faltaba
+GEOCODE_CACHE_PATH = "data/processed/geocode_cache.csv"
+GEOCODE_MAX_PER_RUN = 220 if FAST_MODE else 900  # para no pasarse en Actions
+GEOCODE_DELAY_SECONDS = 1.1  # rate limit respetuoso
+NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
 
 # =========================
 # UTIL
 # =========================
 def ensure_dirs():
     os.makedirs(os.path.dirname(EXPORT_MASTER), exist_ok=True)
+    os.makedirs(os.path.dirname(GEOCODE_CACHE_PATH), exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
     os.makedirs("config", exist_ok=True)
@@ -83,7 +87,7 @@ def load_yaml(path: str):
         return {}
 
 
-def normalize(s):
+def normalize(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip()
 
 
@@ -120,7 +124,7 @@ def read_csv_urls(path: str) -> list[str]:
         "actividad_url",
         "url",
         "link",
-        "convocatoria",  # a veces mal nombrado
+        "convocatoria",
     ]
 
     urls: list[str] = []
@@ -393,7 +397,6 @@ def make_umap_popup_html(ev: dict, public_base_url: str = "") -> str:
 
     fecha_hora = " - ".join([x for x in [fecha, hora] if x])
 
-    # Si imagen = {{archivo.jpg}} => URL pública en Pages
     if imagen.startswith("{{") and imagen.endswith("}}") and public_base_url:
         fn = imagen.strip("{} ").strip()
         imagen = f"{public_base_url.rstrip('/')}/images/{fn}"
@@ -441,7 +444,6 @@ def _to_float(s: str):
     s = (s or "").strip()
     if not s:
         return None
-    # coma decimal: 41,385 -> 41.385
     if "," in s and "." not in s:
         s = s.replace(",", ".")
     s = re.sub(r"\s+", "", s)
@@ -455,6 +457,92 @@ def _valid_latlon(lat, lon) -> bool:
     if lat is None or lon is None:
         return False
     return (-90.0 <= lat <= 90.0) and (-180.0 <= lon <= 180.0)
+
+
+# =========================
+# GEOCODING CACHE
+# =========================
+def load_geocode_cache(path: str) -> dict[str, tuple[str, str]]:
+    """
+    cache: query -> (lat, lon) en strings
+    """
+    cache: dict[str, tuple[str, str]] = {}
+    if not os.path.exists(path):
+        return cache
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as f:
+            r = csv.DictReader(f)
+            for row in r:
+                q = (row.get("query") or "").strip()
+                lat = (row.get("lat") or "").strip()
+                lon = (row.get("lon") or "").strip()
+                if q and lat and lon:
+                    cache[q] = (lat, lon)
+    except Exception:
+        return cache
+    return cache
+
+
+def save_geocode_cache(path: str, cache: dict[str, tuple[str, str]]):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["query", "lat", "lon"])
+        w.writeheader()
+        for q, (lat, lon) in cache.items():
+            w.writerow({"query": q, "lat": lat, "lon": lon})
+
+
+def build_geocode_query(ev: dict) -> str:
+    """
+    Construye una query razonable con lo que haya:
+    - direccion / localizacion_exacta
+    - ciudad
+    - pais (código o nombre)
+    """
+    direccion = normalize(ev.get("direccion", "")) or normalize(ev.get("localizacion_exacta", ""))
+    ciudad = normalize(ev.get("ciudad", ""))
+    pais = normalize(ev.get("pais", ""))
+
+    parts = []
+    if direccion:
+        parts.append(direccion)
+    if ciudad and ciudad.lower() not in (direccion or "").lower():
+        parts.append(ciudad)
+    if pais:
+        parts.append(pais)
+
+    q = ", ".join([p for p in parts if p])
+    return q.strip()
+
+
+def geocode_nominatim(session: requests.Session, query: str) -> tuple[str, str] | None:
+    if not query:
+        return None
+
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 1,
+    }
+    try:
+        r = session.get(
+            NOMINATIM_ENDPOINT,
+            params=params,
+            timeout=(6, 14),
+            headers={"User-Agent": USER_AGENT},
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data:
+            return None
+        lat = str(data[0].get("lat", "")).strip()
+        lon = str(data[0].get("lon", "")).strip()
+        if lat and lon:
+            return lat, lon
+    except Exception:
+        return None
+    return None
 
 
 # =========================
@@ -473,11 +561,12 @@ def main():
     print(f"🎯 Priority URLs: {min(len(priority), MAX_PRIORITY)}")
     print(f"🔎 Keywords: {kw_count}")
     print(f"⚡ FAST_MODE: {FAST_MODE}")
+    print(f"🗺️  Geocoding: {GEOCODING_ENABLED} | max/run={GEOCODE_MAX_PER_RUN}")
 
-    candidates = []
+    candidates: list[str] = []
     seen = set()
 
-    # 1) priority primero
+    # priority primero
     for u in priority[:MAX_PRIORITY]:
         if u not in seen:
             seen.add(u)
@@ -485,7 +574,7 @@ def main():
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
-    # 2) seed crawl (mismo dominio)
+    # seed crawl (mismo dominio)
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
@@ -514,17 +603,21 @@ def main():
 
     print(f"🔎 Candidates total: {len(candidates)}")
 
-    records = []
+    records: list[dict] = []
     n_fetch_ok = 0
     n_events = 0
     started = time.time()
+
+    # geocode cache
+    geocode_cache = load_geocode_cache(GEOCODE_CACHE_PATH)
+    geocoded_now = 0
 
     for i, url in enumerate(candidates, start=1):
         t0 = time.time()
 
         if i % 25 == 0:
             elapsed = time.time() - started
-            print(f"⏳ procesando {i}/{len(candidates)} | eventos: {n_events} | fetch_ok:{n_fetch_ok} | {elapsed:.1f}s")
+            print(f"⏳ {i}/{len(candidates)} | eventos: {n_events} | fetch_ok:{n_fetch_ok} | geocoded:{geocoded_now} | {elapsed:.1f}s")
 
         html = fetch_url(session, url, use_cache=True)
         if html is None:
@@ -547,9 +640,33 @@ def main():
         ev["fuente_url"] = url
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
-
-        # En FAST_MODE no bajamos imágenes; mantenemos lo que venga (URL o {{...}})
         ev["imagen_archivo"] = ev.get("imagen_archivo", "")
+
+        # =========================
+        # GEOCODING (si falta lat/lon)
+        # =========================
+        if GEOCODING_ENABLED and geocoded_now < GEOCODE_MAX_PER_RUN:
+            lat0 = _to_float(str(ev.get("lat", "")))
+            lon0 = _to_float(str(ev.get("lon", "")))
+
+            if not _valid_latlon(lat0, lon0):
+                q = build_geocode_query(ev)
+                if q:
+                    if q in geocode_cache:
+                        ev["lat"], ev["lon"] = geocode_cache[q]
+                    else:
+                        res = geocode_nominatim(session, q)
+                        if res:
+                            lat_s, lon_s = res
+                            # validar
+                            lat1 = _to_float(lat_s)
+                            lon1 = _to_float(lon_s)
+                            if _valid_latlon(lat1, lon1):
+                                ev["lat"] = lat_s
+                                ev["lon"] = lon_s
+                                geocode_cache[q] = (lat_s, lon_s)
+                                geocoded_now += 1
+                        time.sleep(GEOCODE_DELAY_SECONDS)
 
         # popup HTML
         ev["popup_html"] = make_umap_popup_html(ev, public_base_url=PUBLIC_BASE_URL)
@@ -557,13 +674,15 @@ def main():
         records.append(ev)
         n_events += 1
 
-        if (time.time() - t0) > MAX_SECONDS_PER_URL:
-            continue
+    # Guardar cache al final (muy importante para Actions)
+    if GEOCODING_ENABLED:
+        save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
+        print(f"🧠 Geocode cache guardado: {GEOCODE_CACHE_PATH} | entradas: {len(geocode_cache)}")
 
-    # Export master
+    # Export master (con lo que se pudo geocodificar)
     export_csv(EXPORT_MASTER, records, master_columns())
 
-    # Export uMap STRICT (filtra lat/lon inválidos y normaliza)
+    # Export uMap STRICT (solo lat/lon válidos)
     umap_rows = []
     invalid = 0
     for r in records:
@@ -579,7 +698,7 @@ def main():
         r2["lon"] = f"{lon:.6f}"
         umap_rows.append(r2)
 
-    print(f"🧹 uMap strict: {len(umap_rows)} filas OK | {invalid} filas descartadas por lat/lon inválidos")
+    print(f"🧹 uMap strict: {len(umap_rows)} filas OK | {invalid} descartadas por lat/lon inválidos")
     export_csv(EXPORT_UMAP, umap_rows, umap_columns())
 
     elapsed_total = time.time() - started
