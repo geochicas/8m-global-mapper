@@ -1,24 +1,22 @@
 import re
-from datetime import datetime
+from typing import Any, Dict, Optional
+
 from dateparser.search import search_dates
 
+
 TRIGGERS = [
-    "8m", "8 marzo", "8 de marzo", "8 mars", "8 march",
-    "women", "mujer", "mujeres", "femin", "feminista",
-    "international women's day",
-    "dia internacional da mulher",
-    "journée internationale des droits des femmes"
+    "8m", "8 marzo", "8 de marzo", "8 mars", "8 march", "8 mar",
+    "women", "womens", "woman", "women’s", "women's",
+    "mujer", "mujeres", "femin", "feminista",
+    "international women's day", "international womens day", "iwd",
+    "dia internacional da mulher", "dia internacional de la mujer",
+    "journée internationale des droits des femmes",
+    "journee internationale des droits des femmes",
+    "huelga feminista", "paro de mujeres", "paro internacional de mujeres",
+    "marcha", "manifestación", "manifestacion",
+    "movilización", "movilizacion",
 ]
 
-EVENT_CONTEXT_KEYWORDS = [
-    "marcha", "manifestación", "manifestacion",
-    "concentración", "concentracion",
-    "convoca", "convocatoria",
-    "protesta", "movilización", "movilizacion",
-    "plaza", "parque", "avenida",
-    "punto de encuentro", "salida",
-    "a las", "hora", "horas", "h", "pm", "am"
-]
 
 HOUR_PATTERNS = [
     r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
@@ -26,31 +24,13 @@ HOUR_PATTERNS = [
     r"\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s?(am|pm)\b",
 ]
 
-CITIES_CACHE = None
 
-def load_cities(path="config/cities.txt"):
-    global CITIES_CACHE
-    if CITIES_CACHE is not None:
-        return CITIES_CACHE
-    cities = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                c = line.strip()
-                if c:
-                    cities.append(c)
-    except FileNotFoundError:
-        cities = []
-    # ordenar por longitud desc para matchear "San José" antes que "José"
-    cities.sort(key=lambda x: len(x), reverse=True)
-    CITIES_CACHE = cities
-    return CITIES_CACHE
-
-def clean_text(s, max_len=280):
+def clean_text(s: str, max_len: int = 600) -> str:
     s = re.sub(r"\s+", " ", (s or "")).strip()
     return s[:max_len]
 
-def extract_hour(text):
+
+def extract_hour(text: str) -> str:
     txt = (text or "").lower()
 
     m = re.search(HOUR_PATTERNS[2], txt)
@@ -74,124 +54,99 @@ def extract_hour(text):
 
     return ""
 
-def valid_year(dt):
-    return 2000 <= dt.year <= 2100
 
-def score_date(dt, frag, context):
-    score = 0
-    today = datetime.utcnow().date()
+def looks_like_event(text: str, title: str = "") -> bool:
+    blob = (title + "\n" + (text or "")).lower()
+    return any(t in blob for t in TRIGGERS)
 
-    # preferimos marzo y el día 8
-    if dt.month == 3:
-        score += 6
-    if dt.day == 8:
-        score += 4
 
-    # penalizar "hoy" y placeholders
-    if dt.date() == today:
-        score -= 4
-    if dt.month == 1 and dt.day == 1:
-        score -= 3
+def _strip_absurd_years(chunk: str) -> str:
+    return re.sub(r"\b(3[0-9]{3}|[4-9][0-9]{3,})\b", " ", chunk)
 
-    txt = (frag + " " + context).lower()
 
-    if "8m" in txt or "8 marzo" in txt or "8 de marzo" in txt:
-        score += 3
-    if "marcha" in txt or "manifest" in txt or "concentr" in txt:
-        score += 2
-
-    return score
-
-def extract_event_date_contextual(text, title=""):
-    blob = ((title or "") + "\n" + (text or "")).strip()
+def extract_event_date_contextual(text: str, title: str = "") -> str:
+    blob = (title + "\n" + (text or "")).strip()
     if not blob:
         return ""
 
-    lines = [ln.strip() for ln in blob.split("\n") if ln.strip()]
-    chunks = []
+    chunk = blob[:1500]
+    chunk = _strip_absurd_years(chunk)
 
-    for i, ln in enumerate(lines):
-        low = ln.lower()
-        if any(k in low for k in EVENT_CONTEXT_KEYWORDS):
-            start = max(0, i - 2)
-            end = min(len(lines), i + 3)
-            chunks.append(" ".join(lines[start:end]))
-
-    if not chunks:
-        chunks = [blob]
+    # 🔥 PRIORIDAD: detectar explícitamente 8 de marzo
+    explicit_8m = re.search(
+        r"(8\s*(de)?\s*(marzo|mar|mars|march))",
+        chunk.lower()
+    )
+    if explicit_8m:
+        # Asumimos año actual si no está claro
+        import datetime
+        year = datetime.datetime.now().year
+        return f"{year}-03-08"
 
     settings = {
-        "DATE_ORDER": "DMY",
-        "PREFER_DAY_OF_MONTH": "first",
+        "PREFER_DATES_FROM": "future",
         "STRICT_PARSING": False,
+        "RETURN_AS_TIMEZONE_AWARE": False,
     }
 
-    best = None  # (score, dt)
+    try:
+        hits = search_dates(
+            chunk,
+            languages=["es", "en", "pt", "fr"],
+            settings=settings,
+        )
+    except Exception:
+        return ""
 
-    for chunk in chunks:
-        hits = search_dates(chunk, languages=["es", "en", "pt", "fr"], settings=settings)
-        if not hits:
+    if not hits:
+        return ""
+
+    for _, dt in hits:
+        try:
+            if dt and 1900 <= dt.year <= 2100:
+                return dt.date().isoformat()
+        except Exception:
             continue
 
-        for frag, dt in hits:
-            if not dt or not valid_year(dt):
-                continue
-            sc = score_date(dt, frag, chunk)
-            if best is None or sc > best[0]:
-                best = (sc, dt)
-
-    return best[1].strftime("%Y-%m-%d") if best else ""
-
-def detect_city(title, text):
-    cities = load_cities()
-    if not cities:
-        return ""
-    blob = (title or "") + "\n" + (text or "")
-    # búsqueda case-insensitive por palabra completa aproximada
-    for c in cities:
-        # escapar y permitir acentos como vienen; usamos límite de palabra flexible
-        pattern = r"(?i)(?<!\w)" + re.escape(c) + r"(?!\w)"
-        if re.search(pattern, blob):
-            return c
     return ""
 
-def extract_event_fields(parsed):
+
+def extract_event_fields(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    url = parsed.get("url", "")
     title = parsed.get("title", "") or ""
     text = parsed.get("text", "") or ""
-    blob = (title + "\n" + text).lower()
 
-    if not any(t in blob for t in TRIGGERS):
+    if not looks_like_event(text, title):
         return None
 
-    desc = clean_text(text, max_len=280)
-    img = parsed.get("images", [""])[0] if parsed.get("images") else ""
+    imgs = parsed.get("images") or []
+    imagen = imgs[0] if imgs else ""
 
     fecha = extract_event_date_contextual(text, title)
-    hora = extract_hour(title + "\n" + text)
+    hora = extract_hour(text)
 
-    ciudad = detect_city(title, text)
+    convocatoria = clean_text(title, 180)
+    if not convocatoria:
+        lines = [l.strip() for l in (text or "").split("\n") if len(l.strip()) > 10]
+        convocatoria = clean_text(lines[0] if lines else "", 180)
 
-    # localizacion_exacta: por ahora al menos la ciudad (luego mejoramos venue/dirección)
-    localizacion_exacta = ciudad if ciudad else ""
-
-    return {
+    out = {
         "colectiva": "",
-        "convocatoria": clean_text(title, max_len=180),
-        "descripcion": desc,
+        "convocatoria": convocatoria,
+        "descripcion": clean_text(text, 280),
         "fecha": fecha,
         "hora": hora,
         "pais": "",
-        "ciudad": ciudad,
-        "localizacion_exacta": localizacion_exacta,
+        "ciudad": "",
+        "localizacion_exacta": "",
         "direccion": "",
         "lat": "",
         "lon": "",
-        "imagen": img,
-        "cta_url": parsed.get("url", ""),
+        "imagen": imagen,
+        "cta_url": url,
         "sitio_web_colectiva": "",
         "trans_incluyente": "",
-        "fuente_url": parsed.get("url", ""),
-        "fuente_tipo": "web",
         "confianza_extraccion": "media",
-        "precision_ubicacion": ""
+        "precision_ubicacion": "",
     }
+    return out
