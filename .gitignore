@@ -220,3 +220,4 @@ data/images/*
 
 # macOS
 .DS_Store
+config/sources.generated.yml

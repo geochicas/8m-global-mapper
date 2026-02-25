@@ -1,8 +1,3 @@
-# ==========================================
-# PIPELINE PROFILE
-# ==========================================
-FAST_MODE = True  # Mantener en True para estabilidad diaria
-
 import csv
 import os
 import re
@@ -16,15 +11,34 @@ from urllib3.util.retry import Retry
 
 from src.parse.html_parser import parse_page
 from src.extract.extractor_ai import extract_event_fields
-from src.geocode.geocoder import Geocoder
-from src.media.image_processor import download_and_convert_to_jpg
+
+# Opcionales: en FAST_MODE no se usan (pero dejamos imports si los tenés)
+try:
+    from src.geocode.geocoder import Geocoder
+except Exception:
+    Geocoder = None  # type: ignore
+
+try:
+    from src.media.image_processor import download_and_convert_to_jpg
+except Exception:
+    download_and_convert_to_jpg = None  # type: ignore
 
 
 # =========================
-# CONFIG
+# PIPELINE PROFILE
 # =========================
-SOURCES_YML = "config/sources.generated.yml" if os.path.exists("config/sources.generated.yml") else "config/sources.yml"
+FAST_MODE = True  # ✅ mantener True para estabilidad (local + Actions)
+
+
+# =========================
+# PATHS / CONFIG FILES
+# =========================
+BASE_SOURCES_YML = "config/sources.yml"
+GENERATED_SOURCES_YML = "config/sources.generated.yml"
 KEYWORDS_YML = "config/keywords.yml"
+
+# CSV histórico (si existe, se usa para generar priority_urls)
+MASTER_CSV_PATH = "data/raw/convocatorias_2019_2025.csv"
 
 EXPORT_MASTER = "data/exports/mapa_8m_global_master.csv"
 EXPORT_UMAP = "data/exports/mapa_8m_global_umap.csv"
@@ -32,22 +46,29 @@ EXPORT_UMAP = "data/exports/mapa_8m_global_umap.csv"
 CACHE_DIR = "data/raw/html_cache"
 IMAGES_DIR = "data/images"
 
-# ⚡ Modo rápido para iterar sin quedarse pegado
-FAST_MODE = True
+# GitHub Pages base (para renderizar imágenes en popup_html si están publicadas)
+PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 
-# Cobertura (FAST_MODE reduce automáticamente)
+
+# =========================
+# GENERATION BEHAVIOR
+# =========================
+GENERATE_SOURCES_IF_MISSING = True     # crea sources.generated.yml si no existe
+REFRESH_SOURCES_EVERY_RUN = False     # si True, lo regenera siempre
+MAX_PRIORITY_URLS_FROM_CSV = 1200     # cuántas URLs del CSV histórico usar como priority
+
+
+# =========================
+# RUNTIME LIMITS (FAST_MODE)
+# =========================
 MAX_TOTAL_CANDIDATES = 400 if FAST_MODE else 2500
 MAX_PRIORITY = 400 if FAST_MODE else 1200
 MAX_SEEDS = 80 if FAST_MODE else 150
 MAX_PAGES_PER_SEED = 30 if FAST_MODE else 60
 
-# Networking
 TIMEOUT = (5, 12)  # (connect, read)
 DELAY_BETWEEN_REQUESTS = 0.03 if FAST_MODE else 0.06
 USER_AGENT = "geochicas-8m-global-mapper/1.0 (public observatory)"
-
-# Public base para GitHub Pages (ajustá si el repo cambia)
-PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 
 # Watchdog: si una URL tarda demasiado “en total”, la saltamos
 MAX_SECONDS_PER_URL = 18 if FAST_MODE else 35
@@ -60,18 +81,168 @@ def ensure_dirs():
     os.makedirs(os.path.dirname(EXPORT_MASTER), exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
+    os.makedirs("config", exist_ok=True)
 
 
-def load_yaml(path):
+def load_yaml(path: str):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except FileNotFoundError:
         return {}
+    except Exception:
+        return {}
 
 
 def normalize(s):
     return re.sub(r"\s+", " ", (s or "")).strip()
+
+
+def file_exists(p: str) -> bool:
+    return os.path.exists(p) and os.path.getsize(p) > 10
+
+
+def dedupe_urls(urls: list[str]) -> list[str]:
+    out, seen = [], set()
+    for u in urls:
+        u = (u or "").strip()
+        if not u:
+            continue
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def read_csv_urls(path: str) -> list[str]:
+    """
+    Lee URLs desde un CSV histórico.
+    Busca columnas típicas: fuente_url, cta_url, convocatoria_url, actividad_url_convocatoria, url, link.
+    Soporta CSV con delimitador ',' o ';'.
+    """
+    if not os.path.exists(path):
+        return []
+
+    candidates_cols = [
+        "fuente_url",
+        "cta_url",
+        "convocatoria_url",
+        "actividad_url_convocatoria",
+        "actividad_url",
+        "url",
+        "link",
+        "convocatoria",  # a veces mal nombrado, lo intentamos igual
+    ]
+
+    urls: list[str] = []
+
+    def _parse(delimiter=","):
+        nonlocal urls
+        with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+            if not reader.fieldnames:
+                return
+            fieldnames = [c.strip() for c in reader.fieldnames]
+            cols = [c for c in candidates_cols if c in fieldnames]
+            if not cols:
+                return
+            for row in reader:
+                for c in cols:
+                    u = (row.get(c) or "").strip()
+                    if u.startswith(("http://", "https://")):
+                        urls.append(u)
+
+    # Intento con coma
+    _parse(",")
+
+    # Si no salió nada, intento con ';'
+    if not urls:
+        _parse(";")
+
+    return dedupe_urls(urls)
+
+
+def generate_sources_from_base_and_master_csv(
+    base_sources_yml: str,
+    master_csv_path: str,
+    out_generated_yml: str,
+    max_priority: int = 1200,
+):
+    base = load_yaml(base_sources_yml) or {}
+
+    seeds: list[str] = []
+    if isinstance(base, dict):
+        seeds = base.get("seeds") or []
+    elif isinstance(base, list):
+        seeds = base
+
+    seeds = [str(s).strip() for s in seeds if str(s).strip()]
+    priority_urls = read_csv_urls(master_csv_path)[:max_priority]
+
+    payload = {"seeds": seeds, "priority_urls": priority_urls}
+
+    os.makedirs(os.path.dirname(out_generated_yml), exist_ok=True)
+    with open(out_generated_yml, "w", encoding="utf-8") as f:
+        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
+
+
+def select_sources_file() -> str:
+    should_generate = (
+        REFRESH_SOURCES_EVERY_RUN
+        or (GENERATE_SOURCES_IF_MISSING and not file_exists(GENERATED_SOURCES_YML))
+    )
+
+    if should_generate and os.path.exists(MASTER_CSV_PATH):
+        print(f"🧩 Generando {GENERATED_SOURCES_YML} desde {MASTER_CSV_PATH} + {BASE_SOURCES_YML}")
+        generate_sources_from_base_and_master_csv(
+            base_sources_yml=BASE_SOURCES_YML,
+            master_csv_path=MASTER_CSV_PATH,
+            out_generated_yml=GENERATED_SOURCES_YML,
+            max_priority=MAX_PRIORITY_URLS_FROM_CSV,
+        )
+
+    if file_exists(GENERATED_SOURCES_YML):
+        return GENERATED_SOURCES_YML
+
+    return BASE_SOURCES_YML
+
+
+def read_sources_from_path(path: str):
+    y = load_yaml(path)
+    seeds: list[str] = []
+    priority: list[str] = []
+
+    if isinstance(y, dict):
+        seeds = y.get("seeds") or []
+        priority = y.get("priority_urls") or []
+    elif isinstance(y, list):
+        seeds = y
+
+    def dedupe(lst):
+        out, seen = [], set()
+        for s in lst:
+            s = str(s).strip()
+            if not s:
+                continue
+            if s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
+
+    return dedupe(seeds), dedupe(priority)
+
+
+def read_keywords_count() -> int:
+    y = load_yaml(KEYWORDS_YML)
+    if isinstance(y, list):
+        return len([x for x in y if str(x).strip()])
+    if isinstance(y, dict):
+        total = 0
+        for v in y.values():
+            if isinstance(v, list):
+                total += len([x for x in v if str(x).strip()])
+        return total
+    return 0
 
 
 def safe_filename_from_url(url: str) -> str:
@@ -160,56 +331,6 @@ def same_domain(a: str, b: str) -> bool:
         return urlparse(a).netloc == urlparse(b).netloc
     except Exception:
         return False
-
-
-def read_sources():
-    y = load_yaml(SOURCES_YML)
-    seeds = []
-    priority = []
-    if isinstance(y, dict):
-        seeds = y.get("seeds") or []
-        priority = y.get("priority_urls") or []
-    elif isinstance(y, list):
-        seeds = y
-
-    def dedupe(lst):
-        out, seen = [], set()
-        for s in lst:
-            s = str(s).strip()
-            if not s:
-                continue
-            if s not in seen:
-                seen.add(s)
-                out.append(s)
-        return out
-
-    return dedupe(seeds), dedupe(priority)
-
-
-def read_keywords_count():
-    y = load_yaml(KEYWORDS_YML)
-    if isinstance(y, list):
-        return len([x for x in y if str(x).strip()])
-    if isinstance(y, dict):
-        total = 0
-        for v in y.values():
-            if isinstance(v, list):
-                total += len([x for x in v if str(x).strip()])
-        return total
-    return 0
-
-
-def build_geocode_query(ev: dict) -> str:
-    parts = []
-    for key in ["direccion", "localizacion_exacta", "ciudad", "pais"]:
-        v = normalize(ev.get(key, ""))
-        if v:
-            parts.append(v)
-    cleaned = []
-    for p in parts:
-        if not cleaned or cleaned[-1].lower() != p.lower():
-            cleaned.append(p)
-    return ", ".join(cleaned)
 
 
 def master_columns() -> list[str]:
@@ -334,12 +455,14 @@ def main():
     ensure_dirs()
     session = make_session()
 
-    seeds, priority = read_sources()
+    sources_path = select_sources_file()
+    seeds, priority = read_sources_from_path(sources_path)
     kw_count = read_keywords_count()
 
+    print(f"📌 Sources: {sources_path}")
     print(f"🌐 Seeds: {min(len(seeds), MAX_SEEDS)}")
-    print(f"🔎 Keywords: {kw_count}")
     print(f"🎯 Priority URLs: {min(len(priority), MAX_PRIORITY)}")
+    print(f"🔎 Keywords: {kw_count}")
     print(f"⚡ FAST_MODE: {FAST_MODE}")
 
     candidates = []
@@ -353,7 +476,7 @@ def main():
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
-    # 2) seed crawl
+    # 2) seed crawl (mismo dominio)
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
@@ -382,16 +505,14 @@ def main():
 
     print(f"🔎 Candidates total: {len(candidates)}")
 
-    # Geocoder solo si no estamos en FAST_MODE
-    geocoder = None if FAST_MODE else Geocoder()
+    # En FAST_MODE no usamos geocoder ni descarga de imágenes para estabilidad
+    geocoder = None
+    if (not FAST_MODE) and Geocoder:
+        geocoder = Geocoder()
 
     records = []
-    # métricas para ver “dónde se va el tiempo”
     n_fetch_ok = 0
-    n_html_ok = 0
     n_events = 0
-    n_img_ok = 0
-    n_geocode_ok = 0
     started = time.time()
 
     for i, url in enumerate(candidates, start=1):
@@ -399,21 +520,18 @@ def main():
 
         if i % 25 == 0:
             elapsed = time.time() - started
-            print(f"⏳ procesando {i}/{len(candidates)} | eventos: {n_events} | fetch_ok:{n_fetch_ok} img_ok:{n_img_ok} geo_ok:{n_geocode_ok} | {elapsed:.1f}s")
+            print(f"⏳ procesando {i}/{len(candidates)} | eventos: {n_events} | fetch_ok:{n_fetch_ok} | {elapsed:.1f}s")
 
         html = fetch_url(session, url, use_cache=True)
         if html is None:
             continue
         n_fetch_ok += 1
 
-        # watchdog: si solo el fetch ya tardó demasiado, salta pronto
         if (time.time() - t0) > MAX_SECONDS_PER_URL:
             continue
 
         parsed = parse_page(url, html)
-        n_html_ok += 1
 
-        # extractor: nunca tumbar el pipeline
         try:
             ev = extract_event_fields(parsed)
         except Exception:
@@ -422,63 +540,40 @@ def main():
         if not ev:
             continue
 
-        # completa campos de trazabilidad
         ev["fuente_url"] = url
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
 
-        # imagen: opcional (FAST_MODE lo apaga)
-        if not FAST_MODE:
-            img_url = normalize(ev.get("imagen", ""))
-            if img_url and not (img_url.startswith("{{") and img_url.endswith("}}")):
-                res = download_and_convert_to_jpg(img_url, out_dir=IMAGES_DIR)
-                if res:
-                    filename, template = res
-                    ev["imagen"] = template
-                    ev["imagen_archivo"] = filename
-                    n_img_ok += 1
-                else:
-                    ev["imagen_archivo"] = ""
-        else:
-            # en modo rápido, no baja imágenes
+        # En FAST_MODE: no bajamos imágenes; mantenemos lo que venga (URL o {{...}})
+        if FAST_MODE:
             ev["imagen_archivo"] = ev.get("imagen_archivo", "")
+        else:
+            if download_and_convert_to_jpg:
+                img_url = normalize(ev.get("imagen", ""))
+                if img_url and not (img_url.startswith("{{") and img_url.endswith("}}")):
+                    res = download_and_convert_to_jpg(img_url, out_dir=IMAGES_DIR)
+                    if res:
+                        filename, template = res
+                        ev["imagen"] = template
+                        ev["imagen_archivo"] = filename
 
-        # geocode: opcional (FAST_MODE lo apaga)
-        if (not FAST_MODE) and geocoder:
-            lat = normalize(ev.get("lat", ""))
-            lon = normalize(ev.get("lon", ""))
-            if (not lat or not lon) and (ev.get("ciudad") or ev.get("direccion") or ev.get("localizacion_exacta")):
-                q = build_geocode_query(ev)
-                if q:
-                    try:
-                        geo = geocoder.geocode(q, country_code=(ev.get("pais_iso2") or "").strip())
-                    except Exception:
-                        geo = None
-                    if geo:
-                        ev["lat"] = geo.lat
-                        ev["lon"] = geo.lon
-                        ev["precision_ubicacion"] = geo.precision
-                        n_geocode_ok += 1
-
-        # popup HTML para uMap (usa cta_url como “Accede a la convocatoria”)
+        # popup HTML (si imagen es {{...}} se transforma a URL de Pages)
         ev["popup_html"] = make_umap_popup_html(ev, public_base_url=PUBLIC_BASE_URL)
 
         records.append(ev)
         n_events += 1
 
-        # watchdog general: si esta URL se fue demasiado, cortar pronto
         if (time.time() - t0) > MAX_SECONDS_PER_URL:
             continue
 
     if geocoder:
-        geocoder.close()
+        try:
+            geocoder.close()
+        except Exception:
+            pass
 
-    # Export master
     export_csv(EXPORT_MASTER, records, master_columns())
-
-    # Export umap (más “clean” si filtrás por score)
-    umap_rows = records  # o: [r for r in records if int(r.get("score_relevancia", 0) or 0) >= 9]
-    export_csv(EXPORT_UMAP, umap_rows, umap_columns())
+    export_csv(EXPORT_UMAP, records, umap_columns())
 
     elapsed_total = time.time() - started
     print(f"\n📄 CSV master: {EXPORT_MASTER}")
