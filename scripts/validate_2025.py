@@ -3,7 +3,6 @@ import os
 import csv
 import requests
 
-# asegurar que la raíz del proyecto esté en el path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 
@@ -11,8 +10,8 @@ from src.parse.html_parser import parse_page
 from src.extract.extractor_ai import extract_event_fields
 
 INPUT_CSV = "data/raw/convocatorias_2019_2025.csv"
-MAX_ROWS = 100          # subí a 300 o 865 cuando quieras
-TIMEOUT_SECONDS = 12    # bajalo si se pega; subilo si te corta demasiado
+MAX_ROWS = 100
+TIMEOUT_SECONDS = 12
 
 def detect_delimiter(file_path):
     with open(file_path, "r", encoding="utf-8-sig") as f:
@@ -35,14 +34,18 @@ def norm(s):
     return str(s or "").strip()
 
 def norm_date(s):
-    """Tu CSV ya viene YYYY-MM-DD, solo limpiamos y descartamos nulos."""
     s = norm(s)
     if s.lower() in ("", "nan", "none", "null"):
         return ""
-    return s
+    return s  # YYYY-MM-DD
+
+def md(date_str):
+    # devuelve MM-DD
+    if not date_str or len(date_str) < 10:
+        return ""
+    return date_str[5:10]
 
 def norm_time(s):
-    """Convierte HH:MM:SS -> HH:MM (y soporta HH:MM ya)."""
     s = norm(s)
     if s.lower() in ("", "nan", "none", "null"):
         return ""
@@ -66,19 +69,19 @@ def main():
     urls_ok = 0
     detected = 0
 
-    fecha_ok = 0
-    hora_ok = 0
-    fecha_o_hora_ok = 0
-
     fecha_found = 0
     hora_found = 0
+
+    fecha_ok_exact = 0
+    fecha_ok_md = 0
+    hora_ok = 0
 
     ciudad_ok = 0
     imagen_ok = 0
 
     top_fechas = {}
 
-    print(f"\n🔎 Iniciando validación (MAX_ROWS={MAX_ROWS}, timeout={TIMEOUT_SECONDS}s)\n")
+    print(f"\n🔎 Validación (MAX_ROWS={MAX_ROWS}, timeout={TIMEOUT_SECONDS}s)\n")
 
     with open(INPUT_CSV, encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=delim)
@@ -93,56 +96,54 @@ def main():
                 print(f"[{total}] — sin URL")
                 continue
 
-            print(f"[{total}] Fetch: {url}")
-
             html = fetch(url)
             if not html:
-                print(f"[{total}] ⚠️  timeout / error")
+                print(f"[{total}] ⚠️ timeout/error")
                 continue
 
             urls_ok += 1
 
             parsed = parse_page(url, html)
             event = extract_event_fields(parsed)
+
             if not event:
                 print(f"[{total}] — sin match evento")
                 continue
 
             detected += 1
 
-            # ✅ Validación con columnas correctas
             real_fecha = norm_date(row.get("actividad_fecha"))
             real_hora = norm_time(row.get("actividad_hora"))
+            real_ciudad = norm(row.get("ciudad"))
 
             got_fecha = norm_date(event.get("fecha"))
             got_hora = norm_time(event.get("hora"))
+            got_ciudad = norm(event.get("ciudad") or event.get("localizacion_exacta"))
 
             if got_fecha:
                 fecha_found += 1
                 top_fechas[got_fecha] = top_fechas.get(got_fecha, 0) + 1
+
             if got_hora:
                 hora_found += 1
 
-            ok_fecha = bool(real_fecha and got_fecha and real_fecha == got_fecha)
-            ok_hora = bool(real_hora and got_hora and real_hora == got_hora)
+            if real_fecha and got_fecha and real_fecha == got_fecha:
+                fecha_ok_exact += 1
 
-            if ok_fecha:
-                fecha_ok += 1
-            if ok_hora:
+            # match por mes-día aunque el año cambie
+            if real_fecha and got_fecha and md(real_fecha) and md(real_fecha) == md(got_fecha):
+                fecha_ok_md += 1
+
+            if real_hora and got_hora and real_hora == got_hora:
                 hora_ok += 1
-            if ok_fecha or ok_hora:
-                fecha_o_hora_ok += 1
 
-            # ciudad (todavía básico)
-            real_ciudad = row.get("ciudad") or ""
-            if similar(real_ciudad, event.get("localizacion_exacta", "")):
+            if real_ciudad and got_ciudad and similar(real_ciudad, got_ciudad):
                 ciudad_ok += 1
 
-            # imagen
             if event.get("imagen"):
                 imagen_ok += 1
 
-            print(f"[{total}] ✅ evento | fecha={got_fecha or '-'} hora={got_hora or '-'}")
+            print(f"[{total}] ✅ evento | fecha={got_fecha or '-'} hora={got_hora or '-'} ciudad={got_ciudad or '-'}")
 
     print("\n====== REPORTE VALIDACIÓN (MUESTRA) ======")
     print("Filas procesadas:", total if total <= MAX_ROWS else MAX_ROWS)
@@ -150,9 +151,9 @@ def main():
     print("Detectados como evento:", detected)
     print("Fecha encontrada (cualquiera):", fecha_found)
     print("Hora encontrada (cualquiera):", hora_found)
-    print("Fecha correcta:", fecha_ok)
+    print("Fecha correcta (exacta):", fecha_ok_exact)
+    print("Fecha correcta (mes-día):", fecha_ok_md)
     print("Hora correcta:", hora_ok)
-    print("Fecha O hora correcta:", fecha_o_hora_ok)
     print("Ciudad detectada:", ciudad_ok)
     print("Imagen detectada:", imagen_ok)
     print("Top 10 fechas encontradas:")

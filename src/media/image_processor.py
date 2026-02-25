@@ -1,65 +1,65 @@
-# src/media/image_processor.py
+import hashlib
 import os
-import re
-import unicodedata
 from io import BytesIO
+from typing import Optional, Tuple
 
 import requests
 from PIL import Image
 
-IMG_DIR = "data/images"
 
-def slugify(text, max_len=80):
-    text = str(text or "").strip().lower()
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
-    return text[:max_len] if text else "imagen"
+DEFAULT_IMAGES_DIR = "data/images"
 
-def _to_jpg(img, out_path):
-    if img.mode in ("RGBA", "LA", "P"):
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        if img.mode != "RGBA":
-            img = img.convert("RGBA")
-        bg.paste(img, mask=img.split()[-1])
-        img = bg
-    else:
-        img = img.convert("RGB")
 
-    img.save(out_path, format="JPEG", quality=90, optimize=True)
+def _sha1(s: str) -> str:
+    return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
 
-def process_image(event, index=0):
-    os.makedirs(IMG_DIR, exist_ok=True)
 
-    img_url = (event.get("imagen") or "").strip()
-    if not img_url.startswith(("http://", "https://")):
-        return event
+def download_and_convert_to_jpg(
+    image_url: str,
+    out_dir: str = DEFAULT_IMAGES_DIR,
+    timeout_seconds: int = 25,
+    user_agent: str = "geochicas-8m-global-mapper/1.0 (media)",
+) -> Optional[Tuple[str, str]]:
+    """
+    Descarga image_url, la convierte a JPG (RGB), y la guarda como <sha1>.jpg en out_dir.
+    Retorna (filename, template) donde:
+      - filename = "<sha1>.jpg"
+      - template = "{{<sha1>.jpg}}"
+    """
+    if not image_url:
+        return None
 
-    base = "-".join([
-        slugify(event.get("pais", ""), 20),
-        slugify(event.get("ciudad", ""), 20),
-        slugify(event.get("convocatoria", ""), 30),
-        str(index)
-    ]).strip("-")
+    os.makedirs(out_dir, exist_ok=True)
 
-    if not base:
-        base = f"evento-{index}"
+    name = _sha1(image_url) + ".jpg"
+    out_path = os.path.join(out_dir, name)
 
-    filename = f"{base}.jpg"
-    out_path = os.path.join(IMG_DIR, filename)
-
-    # Evita descargar de nuevo si ya existe
-    if os.path.exists(out_path):
-        event["imagen"] = filename
-        return event
+    # si ya existe, no re-descargues
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+        return name, f"{{{{{name}}}}}"
 
     try:
-        r = requests.get(img_url, timeout=20)
+        r = requests.get(
+            image_url,
+            timeout=timeout_seconds,
+            headers={"User-Agent": user_agent},
+        )
         r.raise_for_status()
-        img = Image.open(BytesIO(r.content))
-        _to_jpg(img, out_path)
-        event["imagen"] = filename
+        content = r.content
     except Exception:
-        # Deja la URL original si falla
-        pass
+        return None
 
-    return event
+    try:
+        img = Image.open(BytesIO(content))
+        img = img.convert("RGB")  # asegura JPG compatible
+        img.save(out_path, format="JPEG", quality=85, optimize=True)
+    except Exception:
+        # si la imagen no se puede abrir/convertir, no tumbar el pipeline
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception:
+            pass
+        return None
+
+    return name, f"{{{{{name}}}}}"
