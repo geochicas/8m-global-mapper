@@ -15,9 +15,6 @@ from src.geocode.geocoder import Geocoder
 from src.media.image_processor import download_and_convert_to_jpg
 
 
-# =========================
-# CONFIG
-# =========================
 SOURCES_YML = "config/sources.generated.yml" if os.path.exists("config/sources.generated.yml") else "config/sources.yml"
 KEYWORDS_YML = "config/keywords.yml"
 
@@ -26,19 +23,16 @@ EXPORT_MASTER = "data/exports/mapa_8m_global_master.csv"
 CACHE_DIR = "data/raw/html_cache"
 IMAGES_DIR = "data/images"
 
-MAX_TOTAL_CANDIDATES = 1200       # subilo después
+MAX_TOTAL_CANDIDATES = 1200
 MAX_PRIORITY = 600
 MAX_SEEDS = 150
 MAX_PAGES_PER_SEED = 30
 
-TIMEOUT = (5, 12)                 # (connect, read)
-DELAY_BETWEEN_REQUESTS = 0.05     # cortesía
+TIMEOUT = (5, 12)  # (connect, read)
+DELAY_BETWEEN_REQUESTS = 0.05
 USER_AGENT = "geochicas-8m-global-mapper/1.0 (public observatory)"
 
 
-# =========================
-# UTIL
-# =========================
 def ensure_dirs():
     os.makedirs(os.path.dirname(EXPORT_MASTER), exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -155,7 +149,6 @@ def read_sources():
     elif isinstance(y, list):
         seeds = y
 
-    # normalizar + dedupe
     def dedupe(lst):
         out, seen = [], set()
         for s in lst:
@@ -175,7 +168,6 @@ def read_keywords_count():
     if isinstance(y, list):
         return len([x for x in y if str(x).strip()])
     if isinstance(y, dict):
-        # sumar listas dentro
         total = 0
         for v in y.values():
             if isinstance(v, list):
@@ -222,9 +214,6 @@ def master_columns() -> list[str]:
     ]
 
 
-# =========================
-# MAIN
-# =========================
 def main():
     ensure_dirs()
     session = make_session()
@@ -239,7 +228,6 @@ def main():
     candidates = []
     seen = set()
 
-    # 1) priority primero
     for u in priority[:MAX_PRIORITY]:
         if u not in seen:
             seen.add(u)
@@ -247,7 +235,6 @@ def main():
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
-    # 2) discovery desde seeds (sin filtro por keyword en URL; el extractor filtra por contenido)
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
@@ -284,7 +271,13 @@ def main():
             continue
 
         parsed = parse_page(url, html)
-        ev = extract_event_fields(parsed)
+
+        # ✅ anti-crash: jamás tumbar el pipeline por una página
+        try:
+            ev = extract_event_fields(parsed)
+        except Exception:
+            ev = None
+
         if not ev:
             continue
 
@@ -292,7 +285,6 @@ def main():
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
 
-        # imagen: bajar + convertir a JPG (anti-logos ya está en image_processor)
         img_url = normalize(ev.get("imagen", ""))
         if img_url and not (img_url.startswith("{{") and img_url.endswith("}}")):
             res = download_and_convert_to_jpg(img_url, out_dir=IMAGES_DIR)
@@ -303,7 +295,6 @@ def main():
             else:
                 ev["imagen_archivo"] = ""
 
-        # geocode si falta lat/lon
         lat = normalize(ev.get("lat", ""))
         lon = normalize(ev.get("lon", ""))
         if not lat or not lon:
