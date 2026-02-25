@@ -2,15 +2,20 @@ name: 8M Global Scraper Daily
 
 on:
   schedule:
-    # corre cada día a las 06:00 UTC
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * *"   # diario 06:00 UTC
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
-  run-scraper:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,25 +29,44 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run scraper
         run: |
           python main.py
 
-      - name: Commit updated CSV + images
+      - name: Build Pages site (exports + images)
         run: |
-          git config --global user.name "8M Bot"
-          git config --global user.email "bot@geochicas.org"
+          rm -rf site
+          mkdir -p site/exports site/images
 
-          git add data/exports/*.csv || true
-          git add data/images/*.jpg || true
+          # Copiar CSVs (uMap + master)
+          cp -v data/exports/*.csv site/exports/ || true
 
-          git commit -m "🤖 daily update: eventos 8M global" || echo "no changes"
-          git push
+          # Copiar imágenes si existen (en FAST_MODE normalmente no habrá)
+          cp -v data/images/*.jpg site/images/ || true
+          cp -v data/images/*.jpeg site/images/ || true
+          cp -v data/images/*.png site/images/ || true
+
+          # Index mínimo (para que puedas abrir el sitio y ver carpetas)
+          cat > site/index.html << 'HTML'
+          <html><body>
+            <h1>8M Global Mapper</h1>
+            <ul>
+              <li><a href="./exports/">Exports</a></li>
+              <li><a href="./images/">Images</a></li>
+            </ul>
+          </body></html>
+          HTML
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./data
+        uses: actions/deploy-pages@v4
