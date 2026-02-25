@@ -6,6 +6,8 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 import yaml
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src.parse.html_parser import parse_page
 from src.extract.extractor_ai import extract_event_fields
@@ -16,7 +18,7 @@ from src.media.image_processor import download_and_convert_to_jpg
 # =========================
 # CONFIG
 # =========================
-SOURCES_YML = "config/sources.yml"
+SOURCES_YML = "config/sources.generated.yml" if os.path.exists("config/sources.generated.yml") else "config/sources.yml"
 KEYWORDS_YML = "config/keywords.yml"
 
 EXPORT_MASTER = "data/exports/mapa_8m_global_master.csv"
@@ -24,13 +26,13 @@ EXPORT_MASTER = "data/exports/mapa_8m_global_master.csv"
 CACHE_DIR = "data/raw/html_cache"
 IMAGES_DIR = "data/images"
 
-MAX_SEEDS = 50
-MAX_PAGES_PER_SEED = 80
-MAX_TOTAL_CANDIDATES = 2000
+MAX_TOTAL_CANDIDATES = 1200       # subilo después
+MAX_PRIORITY = 600
+MAX_SEEDS = 150
+MAX_PAGES_PER_SEED = 30
 
-FETCH_TIMEOUT = 20
-DELAY_BETWEEN_REQUESTS = 0.2
-
+TIMEOUT = (5, 12)                 # (connect, read)
+DELAY_BETWEEN_REQUESTS = 0.05     # cortesía
 USER_AGENT = "geochicas-8m-global-mapper/1.0 (public observatory)"
 
 
@@ -61,78 +63,27 @@ def safe_filename_from_url(url: str) -> str:
     return f"{h}.html"
 
 
-def read_keywords() -> list[str]:
-    """
-    Acepta keywords.yml en varios formatos comunes:
-      - lista directa: ["8M", "8 de marzo"]
-      - dict con keys conocidas: {keywords:[...]} o {terms:[...]}
-      - dict con listas por idioma: {es:[...], en:[...]}
-      - dict con cualquier lista (fallback)
-    """
-    y = load_yaml(KEYWORDS_YML)
-
-    # Caso 1: lista directa
-    if isinstance(y, list):
-        return [str(x).strip() for x in y if str(x).strip()]
-
-    # Caso 2: dict
-    if isinstance(y, dict):
-        # prioridades conocidas
-        for k in ["keywords", "terms", "list", "palabras_clave", "tags"]:
-            if k in y and isinstance(y[k], list):
-                return [str(x).strip() for x in y[k] if str(x).strip()]
-
-        # si hay listas por idioma o por categoría, juntarlas
-        collected = []
-        for _, v in y.items():
-            if isinstance(v, list):
-                collected.extend([str(x).strip() for x in v if str(x).strip()])
-        # de-dupe
-        out = []
-        seen = set()
-        for k in collected:
-            if k.lower() not in seen:
-                seen.add(k.lower())
-                out.append(k)
-        return out
-
-    return []
+def make_session():
+    s = requests.Session()
+    retries = Retry(
+        total=1,
+        backoff_factor=0.3,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+    return s
 
 
-def read_seeds() -> list[str]:
-    """
-    Acepta sources.yml en formatos:
-      - {seeds:[...]}
-      - {sources:[ {name:..., url:...}, ... ]} o {sources:[...strings...]}
-      - lista directa
-    """
-    y = load_yaml(SOURCES_YML)
-    seeds = []
-
-    if isinstance(y, dict):
-        if "seeds" in y and isinstance(y["seeds"], list):
-            seeds = y["seeds"]
-        elif "sources" in y and isinstance(y["sources"], list):
-            for it in y["sources"]:
-                if isinstance(it, str):
-                    seeds.append(it)
-                elif isinstance(it, dict) and it.get("url"):
-                    seeds.append(it["url"])
-    elif isinstance(y, list):
-        seeds = y
-
-    seeds = [str(s).strip() for s in seeds if str(s).strip()]
-
-    out = []
-    seen = set()
-    for s in seeds:
-        if s not in seen:
-            seen.add(s)
-            out.append(s)
-    return out
+def is_html_content_type(ct: str) -> bool:
+    ct = (ct or "").lower()
+    return ("text/html" in ct) or ("application/xhtml" in ct) or ct == ""
 
 
-def fetch_url(url: str, use_cache: bool = True) -> str | None:
+def fetch_url(session, url: str, use_cache: bool = True) -> str | None:
     cache_path = os.path.join(CACHE_DIR, safe_filename_from_url(url))
 
     if use_cache and os.path.exists(cache_path) and os.path.getsize(cache_path) > 50:
@@ -143,15 +94,21 @@ def fetch_url(url: str, use_cache: bool = True) -> str | None:
             pass
 
     try:
-        r = requests.get(
+        r = session.get(
             url,
-            timeout=FETCH_TIMEOUT,
+            timeout=TIMEOUT,
             headers={"User-Agent": USER_AGENT},
             allow_redirects=True,
         )
-        r.raise_for_status()
-        html = r.text
     except Exception:
+        return None
+
+    ct = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if not is_html_content_type(ct):
+        return None
+
+    html = r.text or ""
+    if not html:
         return None
 
     if use_cache:
@@ -188,11 +145,43 @@ def same_domain(a: str, b: str) -> bool:
         return False
 
 
-def looks_relevant(url: str, keywords: list[str]) -> bool:
-    if not keywords:
-        return True  # si no hay keywords, no filtrar por URL
-    u = url.lower()
-    return any(k.lower() in u for k in keywords)
+def read_sources():
+    y = load_yaml(SOURCES_YML)
+    seeds = []
+    priority = []
+    if isinstance(y, dict):
+        seeds = y.get("seeds") or []
+        priority = y.get("priority_urls") or []
+    elif isinstance(y, list):
+        seeds = y
+
+    # normalizar + dedupe
+    def dedupe(lst):
+        out, seen = [], set()
+        for s in lst:
+            s = str(s).strip()
+            if not s:
+                continue
+            if s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
+
+    return dedupe(seeds), dedupe(priority)
+
+
+def read_keywords_count():
+    y = load_yaml(KEYWORDS_YML)
+    if isinstance(y, list):
+        return len([x for x in y if str(x).strip()])
+    if isinstance(y, dict):
+        # sumar listas dentro
+        total = 0
+        for v in y.values():
+            if isinstance(v, list):
+                total += len([x for x in v if str(x).strip()])
+        return total
+    return 0
 
 
 def build_geocode_query(ev: dict) -> str:
@@ -221,8 +210,8 @@ def master_columns() -> list[str]:
         "direccion",
         "lat",
         "lon",
-        "imagen",              # {{hash.jpg}} después de descargar
-        "imagen_archivo",      # hash.jpg (trazabilidad)
+        "imagen",
+        "imagen_archivo",
         "cta_url",
         "sitio_web_colectiva",
         "trans_incluyente",
@@ -238,48 +227,59 @@ def master_columns() -> list[str]:
 # =========================
 def main():
     ensure_dirs()
+    session = make_session()
 
-    seeds = read_seeds()[:MAX_SEEDS]
-    keywords = read_keywords()
+    seeds, priority = read_sources()
+    kw_count = read_keywords_count()
 
-    print(f"🌐 Seeds: {len(seeds)}")
-    print(f"🔎 Keywords: {len(keywords)}")
+    print(f"🌐 Seeds: {min(len(seeds), MAX_SEEDS)}")
+    print(f"🔎 Keywords: {kw_count}")
+    print(f"🎯 Priority URLs: {min(len(priority), MAX_PRIORITY)}")
 
     candidates = []
     seen = set()
 
-    for seed in seeds:
-        html = fetch_url(seed, use_cache=True)
+    # 1) priority primero
+    for u in priority[:MAX_PRIORITY]:
+        if u not in seen:
+            seen.add(u)
+            candidates.append(u)
+        if len(candidates) >= MAX_TOTAL_CANDIDATES:
+            break
+
+    # 2) discovery desde seeds (sin filtro por keyword en URL; el extractor filtra por contenido)
+    for seed in seeds[:MAX_SEEDS]:
+        if len(candidates) >= MAX_TOTAL_CANDIDATES:
+            break
+
+        html = fetch_url(session, seed, use_cache=True)
         if not html:
-            print(f"[WARN] Seed sin respuesta: {seed}")
             continue
 
         links = extract_links(seed, html)
-
-        picked = []
+        picked = 0
         for link in links:
+            if len(candidates) >= MAX_TOTAL_CANDIDATES:
+                break
             if link in seen:
                 continue
             if not same_domain(seed, link):
                 continue
-            if not looks_relevant(link, keywords):
-                continue
             seen.add(link)
-            picked.append(link)
-            if len(picked) >= MAX_PAGES_PER_SEED:
+            candidates.append(link)
+            picked += 1
+            if picked >= MAX_PAGES_PER_SEED:
                 break
 
-        print(f"🔗 {seed} -> candidatos: {len(picked)}")
-        candidates.extend(picked)
+        print(f"🔗 {seed} -> candidatos (seed crawl): {picked}")
 
-        if len(candidates) >= MAX_TOTAL_CANDIDATES:
-            break
+    print(f"🔎 Candidates total: {len(candidates)}")
 
     geocoder = Geocoder()
     records = []
 
     for i, url in enumerate(candidates, start=1):
-        html = fetch_url(url, use_cache=True)
+        html = fetch_url(session, url, use_cache=True)
         if not html:
             continue
 
@@ -292,7 +292,7 @@ def main():
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
 
-        # Imagen: bajar+convertir y guardar como {{hash.jpg}}
+        # imagen: bajar + convertir a JPG (anti-logos ya está en image_processor)
         img_url = normalize(ev.get("imagen", ""))
         if img_url and not (img_url.startswith("{{") and img_url.endswith("}}")):
             res = download_and_convert_to_jpg(img_url, out_dir=IMAGES_DIR)
@@ -302,10 +302,8 @@ def main():
                 ev["imagen_archivo"] = filename
             else:
                 ev["imagen_archivo"] = ""
-        else:
-            ev["imagen_archivo"] = ""
 
-        # Geocode si falta lat/lon
+        # geocode si falta lat/lon
         lat = normalize(ev.get("lat", ""))
         lon = normalize(ev.get("lon", ""))
         if not lat or not lon:
@@ -319,7 +317,7 @@ def main():
 
         records.append(ev)
 
-        if i % 50 == 0:
+        if i % 25 == 0:
             print(f"✅ procesadas {i}/{len(candidates)} | eventos: {len(records)}")
 
     geocoder.close()
@@ -330,8 +328,7 @@ def main():
         w.writeheader()
         for r in records:
             for c in cols:
-                if c not in r:
-                    r[c] = ""
+                r.setdefault(c, "")
             w.writerow(r)
 
     print(f"\n📄 CSV master: {EXPORT_MASTER}")
