@@ -41,15 +41,12 @@ jobs:
           rm -rf site
           mkdir -p site/exports site/images
 
-          # Copiar CSVs (uMap + master)
           cp -v data/exports/*.csv site/exports/ || true
 
-          # Copiar imágenes si existen (en FAST_MODE normalmente no habrá)
           cp -v data/images/*.jpg site/images/ || true
           cp -v data/images/*.jpeg site/images/ || true
           cp -v data/images/*.png site/images/ || true
 
-          # Index mínimo (para que puedas abrir el sitio y ver carpetas)
           cat > site/index.html << 'HTML'
           <html><body>
             <h1>8M Global Mapper</h1>
