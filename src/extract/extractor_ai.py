@@ -148,7 +148,7 @@ def extract_event_fields(parsed):
         "precision_ubicacion": ""
     }# src/extract/extractor_ai.py
 import re
-from dateutil import parser as date_parser
+from dateparser.search import search_dates
 
 TRIGGERS = [
     "8m", "8 marzo", "8 mars", "8 march",
@@ -159,25 +159,10 @@ TRIGGERS = [
     "journée internationale des droits des femmes"
 ]
 
-# Horas tipo 5pm, 17:30, 17h, 5:30 pm
 HOUR_PATTERNS = [
-    r"\b([01]?\d|2[0-3]):([0-5]\d)\b",           # 17:30
-    r"\b([01]?\d|2[0-3])\s?h\b",                 # 17h
-    r"\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s?(am|pm)\b",  # 5pm / 5:30 pm
-]
-
-# Fechas comunes (simple)
-DATE_PATTERNS = [
-    r"\b\d{4}-\d{2}-\d{2}\b",                    # 2026-03-08
-    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",              # 08/03/2026
-    r"\b\d{1,2}-\d{1,2}-\d{2,4}\b",              # 08-03-2026
-]
-
-MONTH_WORDS = [
-    "enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","setiembre","octubre","noviembre","diciembre",
-    "january","february","march","april","may","june","july","august","september","october","november","december",
-    "janvier","février","fevrier","mars","avril","mai","juin","juillet","août","aout","septembre","octobre","novembre","décembre","decembre",
-    "março","marco"
+    r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
+    r"\b([01]?\d|2[0-3])\s?h\b",
+    r"\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s?(am|pm)\b",
 ]
 
 def clean_text(s, max_len=280):
@@ -187,7 +172,6 @@ def clean_text(s, max_len=280):
 def extract_hour(text):
     txt = (text or "").lower()
 
-    # am/pm
     m = re.search(HOUR_PATTERNS[2], txt)
     if m:
         hour = int(m.group(1))
@@ -199,65 +183,102 @@ def extract_hour(text):
             hour = 0
         return f"{hour:02d}:{minute:02d}"
 
-    # HH:MM
     m = re.search(HOUR_PATTERNS[0], txt)
     if m:
         return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
 
-    # HHh
     m = re.search(HOUR_PATTERNS[1], txt)
     if m:
         return f"{int(m.group(1)):02d}:00"
 
     return ""
 
-def extract_date(text):
-    txt = text or ""
+def _parse_iso_date(s):
+    s = (s or "").strip()
+    if not s:
+        return ""
+    # soporta 2025-03-08, 2025-03-08T10:00:00Z
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", s)
+    return m.group(1) if m else ""
 
-    # formatos numéricos
-    for pat in DATE_PATTERNS:
-        m = re.search(pat, txt)
-        if m:
-            raw = m.group(0)
-            try:
-                dt = date_parser.parse(raw, dayfirst=True, fuzzy=True)
+from dateparser.search import search_dates
+
+EVENT_KEYWORDS = [
+    "marcha", "manifestación", "concentración",
+    "convoca", "convocatoria",
+    "8m", "8 marzo", "8 mars", "8 march",
+    "plaza", "parque"
+]
+
+def extract_event_date(parsed):
+    text = parsed.get("text", "") or ""
+    lines = text.split("\n")
+
+    candidate_lines = []
+
+    # 1️⃣ buscar líneas con palabras del evento
+    for line in lines:
+        low = line.lower()
+        if any(k in low for k in EVENT_KEYWORDS):
+            candidate_lines.append(line)
+
+    # 2️⃣ si no encontró nada, fallback al texto completo
+    if not candidate_lines:
+        candidate_lines = [text]
+
+    settings = {
+        "DATE_ORDER": "DMY",
+        "PREFER_DAY_OF_MONTH": "first",
+        "STRICT_PARSING": False,
+    }
+
+    for chunk in candidate_lines:
+        hits = search_dates(
+            chunk,
+            languages=["es", "en", "pt", "fr"],
+            settings=settings
+        )
+        if hits:
+            for frag, dt in hits:
+                if dt:
+                    # priorizamos marzo
+                    if dt.month == 3:
+                        return dt.strftime("%Y-%m-%d")
+
+    # fallback: cualquier fecha encontrada
+    hits = search_dates(text, languages=["es","en","pt","fr"], settings=settings)
+    if hits:
+        for frag, dt in hits:
+            if dt:
                 return dt.strftime("%Y-%m-%d")
-            except Exception:
-                pass
-
-    # intentos con mes en palabras (por ejemplo "8 de marzo 2026")
-    low = txt.lower()
-    if any(month in low for month in MONTH_WORDS):
-        # buscar una frase de fecha "candidate"
-        # tomamos una ventana de texto alrededor de "marzo"/"march"/etc.
-        for month in MONTH_WORDS:
-            idx = low.find(month)
-            if idx != -1:
-                start = max(0, idx - 20)
-                end = min(len(txt), idx + 30)
-                chunk = txt[start:end]
-                try:
-                    dt = date_parser.parse(chunk, dayfirst=True, fuzzy=True)
-                    return dt.strftime("%Y-%m-%d")
-                except Exception:
-                    continue
 
     return ""
 
-def guess_location_line(text):
-    """
-    Heurística simple:
-    Busca frases con "en", "at", "venue", "lugar".
-    """
-    txt = text or ""
-    patterns = [
-        r"(?:\ben\b|\blugar\b|\bubicaci[oó]n\b)\s*[:\-]?\s*([A-ZÁÉÍÓÚÑ][^\n\.]{3,120})",
-        r"(?:\bat\b|\bvenue\b|\blocation\b)\s*[:\-]?\s*([A-Z][^\n\.]{3,120})",
-    ]
-    for p in patterns:
-        m = re.search(p, txt, flags=re.IGNORECASE)
-        if m:
-            return clean_text(m.group(1), max_len=120)
+    # 2) texto visible (multilingüe)
+    blob = (parsed.get("title","") + "\n" + parsed.get("text","")).strip()
+    if not blob:
+        return ""
+
+    settings = {
+        "DATE_ORDER": "DMY",
+        "PREFER_DAY_OF_MONTH": "first",
+        "STRICT_PARSING": False,
+    }
+
+    hits = search_dates(
+        blob,
+        languages=["es", "en", "pt", "fr"],
+        settings=settings
+    )
+
+    if not hits:
+        return ""
+
+    # devolvemos la primera fecha encontrada
+    for frag, dt in hits:
+        if dt:
+            return dt.strftime("%Y-%m-%d")
+
     return ""
 
 def extract_event_fields(parsed):
@@ -271,9 +292,8 @@ def extract_event_fields(parsed):
     desc = clean_text(text, max_len=280)
     img = parsed.get("images", [""])[0] if parsed.get("images") else ""
 
-    fecha = extract_date(title + "\n" + text)
+    fecha = extract_event_date(parsed)
     hora = extract_hour(title + "\n" + text)
-    localizacion = guess_location_line(title + "\n" + text)
 
     return {
         "colectiva": "",
@@ -283,7 +303,7 @@ def extract_event_fields(parsed):
         "hora": hora,
         "pais": "",
         "ciudad": "",
-        "localizacion_exacta": localizacion,
+        "localizacion_exacta": "",
         "direccion": "",
         "lat": "",
         "lon": "",
