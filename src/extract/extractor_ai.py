@@ -5,7 +5,7 @@ from dateparser.search import search_dates
 
 
 # =========================
-# 8M ANCHORS (obligatorio: al menos uno)
+# 8M ANCHORS (obligatorio)
 # =========================
 ANCHORS_8M = [
     r"\b8\s*(de\s*)?(marzo|mar|mars|march)\b",
@@ -13,6 +13,7 @@ ANCHORS_8M = [
     r"\biwd\b",
     r"\binternational\s+women['’]?s\s+day\b",
     r"\bd[ií]a\s+internacional\s+de\s+la\s+mujer\b",
+    r"\bdia\s+internacional\s+de\s+la\s+mujer\b",
     r"\bdia\s+internacional\s+da\s+mulher\b",
     r"\bjourn[ée]e\s+internationale\s+des\s+droits\s+des\s+femmes\b",
 ]
@@ -20,7 +21,7 @@ ANCHORS_8M_RE = re.compile("|".join(ANCHORS_8M), flags=re.IGNORECASE)
 
 
 # =========================
-# ACTIVITY / EVENT SIGNALS (queremos actividad, no “tema”)
+# EVENT / ACTIVITY SIGNALS
 # =========================
 EVENT_WORDS = [
     "evento", "actividad", "agenda", "programa", "calendario",
@@ -39,17 +40,17 @@ EVENT_WORDS_LOWER = set(w.lower() for w in EVENT_WORDS)
 
 
 # =========================
-# BOILERPLATE / NAV noise patterns
+# Boilerplate / cookie / nav noise
 # =========================
 BOILERPLATE_PATTERNS = [
     r"utili[sz]em\s+galetes.*?(configuraci[oó]n|configuraci[oó])",
-    r"cookie(s)?",
+    r"\bcookie(s)?\b",
     r"pol[ií]tica\s+de\s+privacidad",
     r"aviso\s+legal",
     r"t[eé]rminos?\s+y\s+condiciones",
     r"configuraci[oó]n\s+de\s+las\s+cookies",
-    r"accept(ar|ar)?\s+cookies",
-    r"rechaz(ar|ar)?\s+cookies",
+    r"accept(ar)?\s+cookies",
+    r"rechaz(ar)?\s+cookies",
 ]
 
 NAV_HEAVY_WORDS = [
@@ -60,7 +61,9 @@ NAV_HEAVY_WORDS = [
 ]
 
 
-# Horas tipo 5pm, 17:30, 17h, 5:30 pm
+# =========================
+# Hour patterns
+# =========================
 HOUR_PATTERNS = [
     r"\b([01]?\d|2[0-3]):([0-5]\d)\b",                 # 17:30
     r"\b([01]?\d|2[0-3])\s?h\b",                       # 17h
@@ -99,16 +102,15 @@ def extract_hour(text: str) -> str:
 
 
 def _strip_absurd_years(chunk: str) -> str:
-    # elimina años absurdos (3000+) que rompen dateparser
+    # elimina años absurdos (3000+) que rompen dateparser (IDs, códigos, etc.)
     return re.sub(r"\b(3[0-9]{3}|[4-9][0-9]{3,})\b", " ", chunk)
 
 
 def strip_boilerplate(text: str) -> str:
     t = text or ""
-    # recorta banners típicos
     for pat in BOILERPLATE_PATTERNS:
         t = re.sub(pat, " ", t, flags=re.IGNORECASE | re.DOTALL)
-    # si hay una sección enorme de cookies/privacidad, la tumba
+    # recorte agresivo si el texto está dominado por cookies/privacidad
     t = re.sub(r"(cookies|privacidad|privacy|galetes).{0,2000}", " ", t, flags=re.IGNORECASE)
     t = re.sub(r"\s+", " ", t).strip()
     return t
@@ -120,19 +122,13 @@ def has_8m_anchor(title: str, text: str) -> bool:
 
 
 def looks_like_index_or_nav_page(title: str, text: str, url: str) -> bool:
-    """
-    Heurística: páginas índice/home (mucho menú, muchas secciones, poco contenido continuo).
-    No bloquea universidades: solo baja ruido de navegación.
-    """
     t = (text or "").lower()
-    # si el texto tiene muchísimas palabras “de menú”
     nav_hits = sum(1 for w in NAV_HEAVY_WORDS if w in t)
-    # muchas “palabras cortas” repetidas (típico de listas de menú)
+
     token_count = len(re.findall(r"\b\w+\b", t))
     unique_tokens = len(set(re.findall(r"\b\w+\b", t)))
     uniqueness = (unique_tokens / token_count) if token_count else 0.0
 
-    # URLs tipo homepage o secciones
     path = ""
     try:
         from urllib.parse import urlparse
@@ -140,12 +136,14 @@ def looks_like_index_or_nav_page(title: str, text: str, url: str) -> bool:
     except Exception:
         path = ""
 
-    homepage_like = (path == "" or path in ["es", "en", "pt", "fr"])
+    homepage_like = (path == "" or path in ["es", "en", "pt", "fr", "ca"])
     very_nav = nav_hits >= 6
     low_uniqueness = (token_count >= 120 and uniqueness < 0.35)
 
-    # título genérico tipo “Mujer | Ayuntamiento …”
-    generic_title = len(title.strip()) <= 40 and any(x in title.lower() for x in ["ayuntamiento", "universidad", "facultad", "department", "departamento"])
+    generic_title = (
+        len((title or "").strip()) <= 40
+        and any(x in (title or "").lower() for x in ["ayuntamiento", "universidad", "facultad", "department", "departamento"])
+    )
 
     return (homepage_like and very_nav) or low_uniqueness or (generic_title and very_nav)
 
@@ -194,39 +192,48 @@ def count_activity_words(blob_lower: str) -> int:
 
 
 def has_date_hint(blob_lower: str) -> bool:
-    # hint “ligero” (sin parsear): 2026-03-08, 8 marzo, 13 de marzo, etc.
-    return bool(re.search(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}\s*(de)?\s*(marzo|mar|mars|march))\b", blob_lower))
+    return bool(
+        re.search(
+            r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}\s*(de)?\s*(marzo|mar|mars|march))\b",
+            blob_lower,
+        )
+    )
 
 
 def has_location_hint(blob_lower: str) -> bool:
-    return any(w in blob_lower for w in ["plaza", "parque", "auditorio", "sala", "punto de encuentro", "dirección", "direccion", "ubicación", "ubicacion", "lugar"])
+    return any(
+        w in blob_lower
+        for w in [
+            "plaza", "parque", "auditorio", "sala",
+            "punto de encuentro",
+            "dirección", "direccion",
+            "ubicación", "ubicacion",
+            "lugar",
+        ]
+    )
 
 
 def relevance_score(title: str, raw_text: str, url: str) -> int:
-    """
-    Score explicable, pero sin sesgo por institución:
-    - requiere ancla 8M
-    - requiere “señales de actividad” (fecha/hora/lugar/registro o vocabulario de evento)
-    - tumba páginas índice/cookies
-    """
     title = title or ""
     text = strip_boilerplate(raw_text or "")
     blob = (title + "\n" + text).strip()
     blob_lower = blob.lower()
 
+    # 1) sin ancla 8M: NO
     if not has_8m_anchor(title, text):
         return 0
 
-    # si es página índice/cookies/nav, fuera
+    # 2) fuera páginas index/nav/cookies
     if looks_like_index_or_nav_page(title, text, url):
         return 0
 
-    # contenido mínimo útil
+    # 3) contenido mínimo útil
     if len(text) < 120:
         return 0
 
     score = 6  # ancla 8M
 
+    # señales
     aw = count_activity_words(blob_lower)
     if aw >= 2:
         score += 3
@@ -242,16 +249,22 @@ def relevance_score(title: str, raw_text: str, url: str) -> int:
     if has_date_hint(blob_lower):
         score += 2
 
-    # bonus si ancla 8M aparece cerca de “actividad”
-    if re.search(r"(8m|8\s*(de\s*)?(marzo|mar|mars|march)).{0,140}(evento|actividad|agenda|programa|convoc|taller|seminario|conferencia|marcha|manifest|inscrip|registro)", blob_lower):
+    if re.search(
+        r"(8m|8\s*(de\s*)?(marzo|mar|mars|march)).{0,140}(evento|actividad|agenda|programa|convoc|taller|seminario|conferencia|marcha|manifest|inscrip|registro)",
+        blob_lower,
+    ):
         score += 2
 
-    # si no hay ninguna “señal dura” (fecha/hora/lugar), probablemente es artículo temático
+    # si no hay señales “duras”, suele ser artículo temático
     hard_signals = 0
-    if extract_hour(blob_lower): hard_signals += 1
-    if has_date_hint(blob_lower): hard_signals += 1
-    if has_location_hint(blob_lower): hard_signals += 1
-    if any(x in blob_lower for x in ["inscripción", "inscripcion", "registro", "regístrate", "registrate"]): hard_signals += 1
+    if extract_hour(blob_lower):
+        hard_signals += 1
+    if has_date_hint(blob_lower):
+        hard_signals += 1
+    if has_location_hint(blob_lower):
+        hard_signals += 1
+    if any(x in blob_lower for x in ["inscripción", "inscripcion", "registro", "regístrate", "registrate"]):
+        hard_signals += 1
 
     if hard_signals == 0:
         score -= 4
@@ -259,35 +272,61 @@ def relevance_score(title: str, raw_text: str, url: str) -> int:
     return score
 
 
-def extract_event_fields(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    url = parsed.get("url", "") or ""
+def _compose_text_with_meta(parsed: Dict[str, Any]) -> str:
+    """
+    Aumenta coverage sin ensuciar:
+    suma meta descriptions y json-ld Event si existe.
+    """
     title = parsed.get("title", "") or ""
     text = parsed.get("text", "") or ""
+    meta = parsed.get("meta") or {}
 
-    score = relevance_score(title, text, url)
+    meta_bits = " ".join(
+        [
+            str(meta.get("description") or ""),
+            str(meta.get("og:description") or ""),
+            str(meta.get("twitter:description") or ""),
+        ]
+    )
 
-    # Umbral: 8 funciona bien para: ancla(6) + (1–2 señales)
-    # Si sigue sucio, subilo a 9.
+    j_bits = ""
+    j_events = parsed.get("jsonld_events") or []
+    try:
+        for ev in j_events[:2]:
+            j_bits += " " + str(ev.get("name", "")) + " " + str(ev.get("description", "")) + " " + str(ev.get("startDate", "")) + " " + str(ev.get("location", ""))
+    except Exception:
+        pass
+
+    return (text + "\n" + meta_bits + "\n" + j_bits).strip(), title
+
+
+def extract_event_fields(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    url = parsed.get("url", "") or ""
+
+    combined_text, title = _compose_text_with_meta(parsed)
+    text_clean = strip_boilerplate(combined_text)
+
+    score = relevance_score(title, text_clean, url)
+
+    # Umbral “limpio”: 8 (si querés aún más limpio, subilo a 9)
     if score < 8:
         return None
 
     imgs = parsed.get("images") or []
     imagen = imgs[0] if imgs else ""
 
-    # fecha/hora (del texto ya limpiado)
-    cleaned = strip_boilerplate(text)
-    fecha = extract_event_date_contextual(cleaned, title)
-    hora = extract_hour(cleaned)
+    fecha = extract_event_date_contextual(text_clean, title)
+    hora = extract_hour(text_clean)
 
     convocatoria = clean_text(title, 180)
     if not convocatoria:
-        lines = [l.strip() for l in (cleaned or "").split("\n") if len(l.strip()) > 10]
+        lines = [l.strip() for l in (text_clean or "").split("\n") if len(l.strip()) > 10]
         convocatoria = clean_text(lines[0] if lines else "", 180)
 
     out = {
         "colectiva": "",
         "convocatoria": convocatoria,
-        "descripcion": clean_text(cleaned, 280),
+        "descripcion": clean_text(text_clean, 280),
         "fecha": fecha,
         "hora": hora,
         "pais": "",

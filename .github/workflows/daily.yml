@@ -1,0 +1,71 @@
+name: Daily 8M scrape + publish
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 6 * * *"   # diario 06:15 UTC (ajustable)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: |
+          python main.py
+
+      - name: Build Pages site (exports + images)
+        run: |
+          rm -rf site
+          mkdir -p site/exports site/images
+
+          # Exports
+          cp -v data/exports/*.csv site/exports/ || true
+
+          # Images
+          cp -v data/images/*.jpg site/images/ || true
+          cp -v data/images/*.jpeg site/images/ || true
+          cp -v data/images/*.png site/images/ || true
+
+          # Minimal index
+          cat > site/index.html << 'HTML'
+          <html><body>
+            <h1>8M Global Mapper</h1>
+            <ul>
+              <li><a href="./exports/">Exports</a></li>
+              <li><a href="./images/">Images</a></li>
+            </ul>
+          </body></html>
+          HTML
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
