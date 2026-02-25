@@ -12,22 +12,11 @@ from urllib3.util.retry import Retry
 from src.parse.html_parser import parse_page
 from src.extract.extractor_ai import extract_event_fields
 
-# Opcionales: en FAST_MODE no se usan (pero dejamos imports si los tenés)
-try:
-    from src.geocode.geocoder import Geocoder
-except Exception:
-    Geocoder = None  # type: ignore
-
-try:
-    from src.media.image_processor import download_and_convert_to_jpg
-except Exception:
-    download_and_convert_to_jpg = None  # type: ignore
-
 
 # =========================
 # PIPELINE PROFILE
 # =========================
-FAST_MODE = True  # ✅ mantener True para estabilidad (local + Actions)
+FAST_MODE = True  # ✅ mantener True (local + Actions)
 
 
 # =========================
@@ -62,11 +51,11 @@ MAX_PRIORITY_URLS_FROM_CSV = 1200     # cuántas URLs del CSV histórico usar co
 # RUNTIME LIMITS (FAST_MODE)
 # =========================
 MAX_TOTAL_CANDIDATES = 400 if FAST_MODE else 2500
-MAX_PRIORITY = 400 if FAST_MODE else 1200
-MAX_SEEDS = 80 if FAST_MODE else 150
+MAX_PRIORITY = 600 if FAST_MODE else 1200
+MAX_SEEDS = 120 if FAST_MODE else 150
 MAX_PAGES_PER_SEED = 30 if FAST_MODE else 60
 
-TIMEOUT = (5, 12)  # (connect, read)
+TIMEOUT = (6, 14)  # (connect, read)
 DELAY_BETWEEN_REQUESTS = 0.03 if FAST_MODE else 0.06
 USER_AGENT = "geochicas-8m-global-mapper/1.0 (public observatory)"
 
@@ -131,7 +120,7 @@ def read_csv_urls(path: str) -> list[str]:
         "actividad_url",
         "url",
         "link",
-        "convocatoria",  # a veces mal nombrado, lo intentamos igual
+        "convocatoria",  # a veces mal nombrado
     ]
 
     urls: list[str] = []
@@ -152,10 +141,7 @@ def read_csv_urls(path: str) -> list[str]:
                     if u.startswith(("http://", "https://")):
                         urls.append(u)
 
-    # Intento con coma
     _parse(",")
-
-    # Si no salió nada, intento con ';'
     if not urls:
         _parse(";")
 
@@ -449,6 +435,29 @@ def make_umap_popup_html(ev: dict, public_base_url: str = "") -> str:
 
 
 # =========================
+# uMap strict helpers
+# =========================
+def _to_float(s: str):
+    s = (s or "").strip()
+    if not s:
+        return None
+    # coma decimal: 41,385 -> 41.385
+    if "," in s and "." not in s:
+        s = s.replace(",", ".")
+    s = re.sub(r"\s+", "", s)
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _valid_latlon(lat, lon) -> bool:
+    if lat is None or lon is None:
+        return False
+    return (-90.0 <= lat <= 90.0) and (-180.0 <= lon <= 180.0)
+
+
+# =========================
 # MAIN
 # =========================
 def main():
@@ -505,11 +514,6 @@ def main():
 
     print(f"🔎 Candidates total: {len(candidates)}")
 
-    # En FAST_MODE no usamos geocoder ni descarga de imágenes para estabilidad
-    geocoder = None
-    if (not FAST_MODE) and Geocoder:
-        geocoder = Geocoder()
-
     records = []
     n_fetch_ok = 0
     n_events = 0
@@ -544,20 +548,10 @@ def main():
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
 
-        # En FAST_MODE: no bajamos imágenes; mantenemos lo que venga (URL o {{...}})
-        if FAST_MODE:
-            ev["imagen_archivo"] = ev.get("imagen_archivo", "")
-        else:
-            if download_and_convert_to_jpg:
-                img_url = normalize(ev.get("imagen", ""))
-                if img_url and not (img_url.startswith("{{") and img_url.endswith("}}")):
-                    res = download_and_convert_to_jpg(img_url, out_dir=IMAGES_DIR)
-                    if res:
-                        filename, template = res
-                        ev["imagen"] = template
-                        ev["imagen_archivo"] = filename
+        # En FAST_MODE no bajamos imágenes; mantenemos lo que venga (URL o {{...}})
+        ev["imagen_archivo"] = ev.get("imagen_archivo", "")
 
-        # popup HTML (si imagen es {{...}} se transforma a URL de Pages)
+        # popup HTML
         ev["popup_html"] = make_umap_popup_html(ev, public_base_url=PUBLIC_BASE_URL)
 
         records.append(ev)
@@ -566,19 +560,33 @@ def main():
         if (time.time() - t0) > MAX_SECONDS_PER_URL:
             continue
 
-    if geocoder:
-        try:
-            geocoder.close()
-        except Exception:
-            pass
-
+    # Export master
     export_csv(EXPORT_MASTER, records, master_columns())
-    export_csv(EXPORT_UMAP, records, umap_columns())
+
+    # Export uMap STRICT (filtra lat/lon inválidos y normaliza)
+    umap_rows = []
+    invalid = 0
+    for r in records:
+        lat = _to_float(str(r.get("lat", "")))
+        lon = _to_float(str(r.get("lon", "")))
+
+        if not _valid_latlon(lat, lon):
+            invalid += 1
+            continue
+
+        r2 = dict(r)
+        r2["lat"] = f"{lat:.6f}"
+        r2["lon"] = f"{lon:.6f}"
+        umap_rows.append(r2)
+
+    print(f"🧹 uMap strict: {len(umap_rows)} filas OK | {invalid} filas descartadas por lat/lon inválidos")
+    export_csv(EXPORT_UMAP, umap_rows, umap_columns())
 
     elapsed_total = time.time() - started
     print(f"\n📄 CSV master: {EXPORT_MASTER}")
     print(f"📄 CSV uMap:   {EXPORT_UMAP}")
-    print(f"🧾 Eventos exportados: {len(records)}")
+    print(f"🧾 Eventos exportados (master): {len(records)}")
+    print(f"🧾 Eventos exportados (uMap):   {len(umap_rows)}")
     print(f"⏱️  Tiempo total: {elapsed_total:.1f}s")
 
 
