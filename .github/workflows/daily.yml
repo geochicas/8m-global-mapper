@@ -1,71 +1,48 @@
-name: Daily 8M scrape + publish
+name: 8M Global Scraper Daily
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "15 6 * * *"   # diario 06:15 UTC (ajustable)
+    # corre cada día a las 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  build:
+  run-scraper:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run pipeline
+      - name: Run scraper
         run: |
           python main.py
 
-      - name: Build Pages site (exports + images)
+      - name: Commit updated CSV + images
         run: |
-          rm -rf site
-          mkdir -p site/exports site/images
+          git config --global user.name "8M Bot"
+          git config --global user.email "bot@geochicas.org"
 
-          # Exports
-          cp -v data/exports/*.csv site/exports/ || true
+          git add data/exports/*.csv || true
+          git add data/images/*.jpg || true
 
-          # Images
-          cp -v data/images/*.jpg site/images/ || true
-          cp -v data/images/*.jpeg site/images/ || true
-          cp -v data/images/*.png site/images/ || true
-
-          # Minimal index
-          cat > site/index.html << 'HTML'
-          <html><body>
-            <h1>8M Global Mapper</h1>
-            <ul>
-              <li><a href="./exports/">Exports</a></li>
-              <li><a href="./images/">Images</a></li>
-            </ul>
-          </body></html>
-          HTML
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
+          git commit -m "🤖 daily update: eventos 8M global" || echo "no changes"
+          git push
 
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./data
