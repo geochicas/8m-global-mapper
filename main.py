@@ -40,7 +40,7 @@ PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 
 
 # =========================
-# LIMITES (global “real” manteniendo FAST_MODE)
+# LIMITES
 # =========================
 MAX_TOTAL_CANDIDATES = 2500 if FAST_MODE else 6000
 MAX_PRIORITY = 1500 if FAST_MODE else 3000
@@ -49,7 +49,7 @@ MAX_PAGES_PER_SEED = 60 if FAST_MODE else 120
 
 TIMEOUT = (7, 20)
 DELAY_BETWEEN_REQUESTS = 0.04 if FAST_MODE else 0.08
-USER_AGENT = "geochicas-8m-global-mapper/1.2 (public observatory; contact: geochicas)"
+USER_AGENT = "geochicas-8m-global-mapper/1.3 (public observatory; contact: geochicas)"
 MAX_SECONDS_PER_URL = 25 if FAST_MODE else 40
 
 
@@ -193,7 +193,7 @@ def same_domain(a: str, b: str) -> bool:
 
 
 # =========================
-# Lectura seeds/priority
+# Seeds / Priority
 # =========================
 def read_csv_urls(path: str) -> list[str]:
     if not os.path.exists(path):
@@ -260,8 +260,7 @@ def generate_sources_from_base_and_master_csv(
 
 
 def select_sources_file() -> str:
-    should_generate = (not file_exists(GENERATED_SOURCES_YML))
-    if should_generate and os.path.exists(MASTER_CSV_PATH):
+    if (not file_exists(GENERATED_SOURCES_YML)) and os.path.exists(MASTER_CSV_PATH):
         print(f"🧩 Generando {GENERATED_SOURCES_YML} desde {MASTER_CSV_PATH} + {BASE_SOURCES_YML}")
         generate_sources_from_base_and_master_csv(
             base_sources_yml=BASE_SOURCES_YML,
@@ -323,7 +322,6 @@ def load_cities(path: str) -> list[str]:
             if not s or s.startswith("#"):
                 continue
             cities.append(s)
-    # primero las más largas (evita match “San” antes de “San José”)
     cities.sort(key=lambda x: len(x), reverse=True)
     return cities
 
@@ -334,7 +332,6 @@ def detect_city(text: str, cities: list[str]) -> str | None:
     t = " " + normalize(text).lower() + " "
     for city in cities:
         c = city.lower()
-        # palabra completa (aprox)
         if re.search(rf"(?<!\w){re.escape(c)}(?!\w)", t):
             return city
     return None
@@ -406,22 +403,24 @@ def master_columns() -> list[str]:
         "confianza_extraccion",
         "precision_ubicacion",
         "score_relevancia",
-        "popup_html",
     ]
 
 
 def umap_columns() -> list[str]:
+    # uMap usa name/description por defecto
     return [
+        "name",
+        "description",
+        "lat",
+        "lon",
+        # extras por si querés debug en CSV
         "colectiva",
         "convocatoria",
         "direccion",
         "fecha",
         "hora",
-        "lat",
-        "lon",
         "imagen",
         "cta_url",
-        "popup_html",
         "fuente_url",
         "score_relevancia",
     ]
@@ -438,56 +437,79 @@ def export_csv(path: str, rows: list[dict], columns: list[str]):
             w.writerow(r)
 
 
-def make_umap_popup_html(ev: dict, public_base_url: str = "") -> str:
-    def esc(s: str) -> str:
-        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def is_direct_image_url(u: str) -> bool:
+    u = (u or "").strip().lower()
+    return u.startswith(("http://", "https://")) and u.endswith((".jpg", ".jpeg", ".png"))
 
-    colectiva = (ev.get("colectiva") or "").strip()
-    convocatoria_titulo = (ev.get("convocatoria") or "").strip()
-    titulo = colectiva or convocatoria_titulo or "Convocatoria 8M"
 
-    convocatoria_url = (ev.get("cta_url") or ev.get("fuente_url") or "").strip()
-    direccion = (ev.get("direccion") or ev.get("localizacion_exacta") or "").strip()
-    fecha = (ev.get("fecha") or "").strip()
-    hora = (ev.get("hora") or "").strip()
-
+def resolve_public_image_url(ev: dict) -> str:
+    """
+    1) Si imagen ya es URL directa .jpg/.png => usarla
+    2) Si imagen es {{file.jpg}} => apuntar a GitHub Pages /images/file.jpg
+    3) Si no hay imagen usable => ""
+    """
     imagen = (ev.get("imagen") or "").strip()
-    imagen_archivo = (ev.get("imagen_archivo") or "").strip()
+    if is_direct_image_url(imagen):
+        return imagen
 
-    fecha_hora = " - ".join([x for x in [fecha, hora] if x])
-
-    if imagen.startswith("{{") and imagen.endswith("}}") and public_base_url:
+    if imagen.startswith("{{") and imagen.endswith("}}"):
         fn = imagen.strip("{} ").strip()
-        imagen = f"{public_base_url.rstrip('/')}/images/{fn}"
-    elif (not imagen) and imagen_archivo and public_base_url:
-        imagen = f"{public_base_url.rstrip('/')}/images/{imagen_archivo}"
+        if fn:
+            return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{fn}"
 
-    parts = []
-    if convocatoria_url:
-        parts.append(
-            f'<h3 style="margin:0 0 8px 0;">'
-            f'<a href="{convocatoria_url}" target="_blank" rel="noopener noreferrer">{esc(titulo)}</a>'
-            f"</h3>"
-        )
+    # Si tenés imagen_archivo pero no llenaste imagen con {{...}}
+    imagen_archivo = (ev.get("imagen_archivo") or "").strip()
+    if imagen_archivo:
+        return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{imagen_archivo}"
+
+    return ""
+
+
+def make_umap_description_md(ev: dict) -> str:
+    """
+    Markdown compatible con uMap:
+    - Título con link opcional
+    - Dirección
+    - Fecha/hora
+    - Línea con URL de imagen (uMap la renderiza)
+    - Wikilink a convocatoria
+    """
+    colectiva = normalize(ev.get("colectiva", ""))
+    convocatoria = normalize(ev.get("convocatoria", ""))
+    sitio = (ev.get("sitio_web_colectiva") or "").strip()
+    cta = (ev.get("cta_url") or "").strip()
+
+    direccion = normalize(ev.get("direccion", "")) or normalize(ev.get("localizacion_exacta", ""))
+    fecha = normalize(ev.get("fecha", ""))
+    hora = normalize(ev.get("hora", ""))
+
+    # IMPORTANTE: uMap considera [[URL|texto]] solo si URL es http(s)
+    title = colectiva or convocatoria or "Convocatoria 8M"
+
+    lines = []
+
+    if sitio.startswith(("http://", "https://")) and colectiva:
+        lines.append(f"## [[{sitio}|{colectiva}]]")
     else:
-        parts.append(f'<h3 style="margin:0 0 8px 0;">{esc(titulo)}</h3>')
+        lines.append(f"## {title}")
 
     if direccion:
-        parts.append(f'<p style="margin:0 0 10px 0;">{esc(direccion)}</p>')
-    if fecha_hora:
-        parts.append(f'<p style="margin:0 0 14px 0;">{esc(fecha_hora)}</p>')
-    if imagen:
-        parts.append(
-            '<div style="margin:0 0 12px 0;">'
-            f'<img src="{imagen}" style="max-width:100%; height:auto; border-radius:4px;" />'
-            "</div>"
-        )
-    if convocatoria_url:
-        parts.append(
-            f'<p style="margin:0;"><a href="{convocatoria_url}" target="_blank" rel="noopener noreferrer">'
-            "Accede a la convocatoria</a></p>"
-        )
-    return "\n".join(parts).strip()
+        lines.append(direccion)
+
+    if fecha or hora:
+        if fecha and hora:
+            lines.append(f"{fecha} - {hora}")
+        else:
+            lines.append(fecha or hora)
+
+    img = resolve_public_image_url(ev)
+    if is_direct_image_url(img):
+        lines.append(img)
+
+    if cta.startswith(("http://", "https://")):
+        lines.append(f"[[{cta}|Accede a la convocatoria]]")
+
+    return "\n".join([l for l in lines if l]).strip()
 
 
 # =========================
@@ -606,7 +628,6 @@ def main():
     candidates: list[str] = []
     seen = set()
 
-    # Priority primero
     for u in priority[:MAX_PRIORITY]:
         if u not in seen:
             seen.add(u)
@@ -614,7 +635,6 @@ def main():
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
-    # Seed crawl (mismo dominio)
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
@@ -649,7 +669,6 @@ def main():
     geocode_cache = load_geocode_cache(GEOCODE_CACHE_PATH)
     geocoded_now = 0
 
-    # contadores de debug
     filled_city = 0
     filled_country = 0
 
@@ -681,20 +700,19 @@ def main():
         if not ev:
             continue
 
-        # defaults
         ev.setdefault("pais", "")
         ev.setdefault("ciudad", "")
         ev.setdefault("direccion", "")
         ev.setdefault("localizacion_exacta", "")
         ev.setdefault("lat", "")
         ev.setdefault("lon", "")
+        ev.setdefault("sitio_web_colectiva", "")
 
         ev["fuente_url"] = url
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
         ev["imagen_archivo"] = ev.get("imagen_archivo", "")
 
-        # ====== Fallback: ciudad / país ======
         if not normalize(ev.get("ciudad", "")):
             c = detect_city(" ".join([title, text_blob]), cities)
             if c:
@@ -707,11 +725,9 @@ def main():
                 ev["pais"] = p
                 filled_country += 1
 
-        # si no hay dirección pero hay ciudad, al menos guardá ciudad como localización aproximada
         if not normalize(ev.get("localizacion_exacta", "")) and normalize(ev.get("ciudad", "")):
             ev["localizacion_exacta"] = ev["ciudad"]
 
-        # ====== Geocoding ======
         if GEOCODING_ENABLED and geocoded_now < GEOCODE_MAX_PER_RUN:
             lat0 = _to_float(str(ev.get("lat", "")))
             lon0 = _to_float(str(ev.get("lon", "")))
@@ -733,26 +749,30 @@ def main():
                                 geocoded_now += 1
                         time.sleep(GEOCODE_DELAY_SECONDS)
 
-        ev["popup_html"] = make_umap_popup_html(ev, public_base_url=PUBLIC_BASE_URL)
         records.append(ev)
 
     if GEOCODING_ENABLED:
         save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
         print(f"🧠 Geocode cache guardado: {GEOCODE_CACHE_PATH} | entradas: {len(geocode_cache)}")
 
-    # Export master
     export_csv(EXPORT_MASTER, records, master_columns())
 
-    # Export uMap + sin coord
     umap_rows = []
     sin_coord_rows = []
+
     for r in records:
         lat = _to_float(str(r.get("lat", "")))
         lon = _to_float(str(r.get("lon", "")))
+
         if _valid_latlon(lat, lon):
             r2 = dict(r)
             r2["lat"] = f"{lat:.6f}"
             r2["lon"] = f"{lon:.6f}"
+
+            # uMap fields:
+            r2["name"] = normalize(r2.get("colectiva", "")) or normalize(r2.get("convocatoria", "")) or "Convocatoria 8M"
+            r2["description"] = make_umap_description_md(r2)
+
             umap_rows.append(r2)
         else:
             sin_coord_rows.append(dict(r))
