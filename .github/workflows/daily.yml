@@ -2,7 +2,7 @@ name: 8M Global Scraper Daily
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # diario 06:00 UTC
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -40,8 +40,8 @@ jobs:
         run: |
           echo "== data/exports =="
           ls -lah data/exports || true
-          echo "== data/raw =="
-          ls -lah data/raw || true
+          echo "== data/processed =="
+          ls -lah data/processed || true
           echo "== config =="
           ls -lah config || true
 
@@ -50,15 +50,12 @@ jobs:
           rm -rf site
           mkdir -p site/exports site/images
 
-          # Copiar CSVs (uMap + master)
           cp -v data/exports/*.csv site/exports/ || true
 
-          # Copiar imágenes si existen
           cp -v data/images/*.jpg site/images/ || true
           cp -v data/images/*.jpeg site/images/ || true
           cp -v data/images/*.png site/images/ || true
 
-          # Index raíz
           cat > site/index.html << 'HTML'
           <html><body>
             <h1>8M Global Mapper</h1>
@@ -66,26 +63,20 @@ jobs:
               <li><a href="./exports/index.html">Exports</a></li>
               <li><a href="./images/index.html">Images</a></li>
             </ul>
-            <p>Links directos:</p>
-            <ul>
-              <li><a href="./exports/mapa_8m_global_umap.csv">mapa_8m_global_umap.csv</a></li>
-              <li><a href="./exports/mapa_8m_global_master.csv">mapa_8m_global_master.csv</a></li>
-            </ul>
           </body></html>
           HTML
 
-          # Index exports (evita 404)
           cat > site/exports/index.html << 'HTML'
           <html><body>
             <h2>Exports</h2>
             <ul>
               <li><a href="./mapa_8m_global_umap.csv">mapa_8m_global_umap.csv</a></li>
               <li><a href="./mapa_8m_global_master.csv">mapa_8m_global_master.csv</a></li>
+              <li><a href="./mapa_8m_global_sin_coord.csv">mapa_8m_global_sin_coord.csv</a></li>
             </ul>
           </body></html>
           HTML
 
-          # Index images (evita 404 aunque esté vacío)
           cat > site/images/index.html << 'HTML'
           <html><body>
             <h2>Images</h2>
