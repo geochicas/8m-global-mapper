@@ -169,6 +169,7 @@ GitHub no guarda por defecto los outputs generados (CSV, imágenes, etc.).
 * Revisar `data/exports/mapa_8m_master.csv`
 * Iterar (ajustar fuentes/keywords)
 * Importar CSV a uMap (en fases posteriores, ya con geocodificación e imágenes procesadas)
+** Descarga del CSV - https://geochicas.github.io/8m-global-mapper/exports/mapa_8m_global_umap.csv 
 
 ## Flujo recomendado (práctico)
 
