@@ -10,10 +10,6 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -29,29 +25,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run scraper
         run: |
           python main.py
 
-      - name: Debug outputs (sanity check)
-        run: |
-          echo "== data/exports =="
-          ls -lah data/exports || true
-          echo "== data/processed =="
-          ls -lah data/processed || true
-          echo "== config =="
-          ls -lah config || true
-
-      - name: Build Pages site (exports + images)
+      - name: Build static site (exports + images)
         run: |
           rm -rf site
           mkdir -p site/exports site/images
 
           cp -v data/exports/*.csv site/exports/ || true
-
           cp -v data/images/*.jpg site/images/ || true
           cp -v data/images/*.jpeg site/images/ || true
           cp -v data/images/*.png site/images/ || true
@@ -60,32 +45,31 @@ jobs:
           <html><body>
             <h1>8M Global Mapper</h1>
             <ul>
-              <li><a href="./exports/index.html">Exports</a></li>
-              <li><a href="./images/index.html">Images</a></li>
+              <li><a href="./exports/index.html">exports/</a></li>
+              <li><a href="./images/index.html">images/</a></li>
             </ul>
           </body></html>
           HTML
 
-          cat > site/exports/index.html << 'HTML'
-          <html><body>
-            <h2>Exports</h2>
-            <ul>
-              <li><a href="./mapa_8m_global_umap.csv">mapa_8m_global_umap.csv</a></li>
-              <li><a href="./mapa_8m_global_master.csv">mapa_8m_global_master.csv</a></li>
-              <li><a href="./mapa_8m_global_sin_coord.csv">mapa_8m_global_sin_coord.csv</a></li>
-            </ul>
-          </body></html>
-          HTML
+          python - << 'PY'
+          import os
 
-          cat > site/images/index.html << 'HTML'
-          <html><body>
-            <h2>Images</h2>
-            <p>Esta carpeta puede estar vacía en FAST_MODE.</p>
-          </body></html>
-          HTML
+          def write_index(dirpath, title):
+              items = sorted(os.listdir(dirpath))
+              html = [f"<html><body><h1>{title}</h1><ul>"]
+              for it in items:
+                  if it == "index.html":
+                      continue
+                  html.append(f'<li><a href="./{it}">{it}</a></li>')
+              html.append("</ul></body></html>")
+              with open(os.path.join(dirpath, "index.html"), "w", encoding="utf-8") as f:
+                  f.write("\n".join(html))
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+          os.makedirs("site/exports", exist_ok=True)
+          os.makedirs("site/images", exist_ok=True)
+          write_index("site/exports", "Exports")
+          write_index("site/images", "Images")
+          PY
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
