@@ -3,6 +3,7 @@ import os
 import re
 import time
 import hashlib
+from datetime import date, datetime
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -41,6 +42,14 @@ PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 
 
 # =========================
+# FECHAS (FILTRO)
+# =========================
+# Mantener solo eventos a partir de este día (YYYY-MM-DD).
+# Recomendación práctica: 2025-01-01 para ciclo 2025/2026.
+MIN_EVENT_DATE = date(2025, 1, 1)
+
+
+# =========================
 # LIMITES
 # =========================
 MAX_TOTAL_CANDIDATES = 2500 if FAST_MODE else 6000
@@ -50,7 +59,7 @@ MAX_PAGES_PER_SEED = 60 if FAST_MODE else 120
 
 TIMEOUT = (7, 20)
 DELAY_BETWEEN_REQUESTS = 0.04 if FAST_MODE else 0.08
-USER_AGENT = "geochicas-8m-global-mapper/1.4 (public observatory; contact: geochicas)"
+USER_AGENT = "geochicas-8m-global-mapper/1.5 (public observatory; contact: geochicas)"
 MAX_SECONDS_PER_URL = 25 if FAST_MODE else 40
 
 
@@ -70,8 +79,8 @@ NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
 IMAGES_ENABLED = True
 MAX_IMAGES_PER_RUN = 250 if FAST_MODE else 1500
 IMAGE_TIMEOUT = (7, 25)
-IMAGE_MIN_BYTES = 20_000          # evita iconitos
-IMAGE_MAX_BYTES = 6_000_000       # evita monstruos
+IMAGE_MIN_BYTES = 20_000
+IMAGE_MAX_BYTES = 6_000_000
 BLOCKLIST_IMAGE_HINTS = [
     "logo", "icon", "sprite", "favicon", "apple-touch-icon", "site-icon",
     "header", "footer", "navbar", "menu", "brand", "badge", "avatar"
@@ -395,7 +404,29 @@ def infer_country_from_url(url: str) -> str | None:
 
 
 # =========================
-# IMAGE SELECTION + DOWNLOAD
+# FECHA: parse + filtro
+# =========================
+def parse_iso_date(s: str) -> date | None:
+    s = (s or "").strip()
+    if not s:
+        return None
+    # esperamos YYYY-MM-DD (como tu dataset)
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def passes_date_filter(ev: dict) -> bool:
+    d = parse_iso_date(ev.get("fecha", ""))
+    if not d:
+        # si no hay fecha, lo dejamos pasar (para no perder eventos) — ajustable
+        return True
+    return d >= MIN_EVENT_DATE
+
+
+# =========================
+# IMAGE selection + download
 # =========================
 def is_probably_logo_url(u: str) -> bool:
     s = (u or "").lower()
@@ -403,42 +434,27 @@ def is_probably_logo_url(u: str) -> bool:
 
 
 def pick_best_image_candidate(parsed: dict) -> str:
-    """
-    Intenta sacar una imagen tipo afiche:
-    - meta og:image / twitter:image (si parse_page las expone)
-    - imagenes encontradas en la página
-    - fallback a extractor_ai si ya puso imagen
-    """
     if not isinstance(parsed, dict):
         return ""
-
-    # 1) meta
     meta = parsed.get("meta") or {}
     for k in ["og:image", "twitter:image", "twitter:image:src"]:
         u = (meta.get(k) or "").strip()
         if u and u.startswith(("http://", "https://")) and not is_probably_logo_url(u):
             return u
-
-    # 2) lista de imágenes (si existe)
     imgs = parsed.get("images") or []
     if isinstance(imgs, list):
         for u in imgs:
             u = (u or "").strip()
             if u.startswith(("http://", "https://")) and not is_probably_logo_url(u):
                 return u
-
     return ""
 
 
 def download_image(session: requests.Session, image_url: str) -> str | None:
-    """
-    Descarga imagen si es jpeg/png. Devuelve filename (ej: abc123.jpg) o None.
-    """
     if not image_url or not image_url.startswith(("http://", "https://")):
         return None
 
     h = sha1(image_url)
-    # intentamos adivinar extensión
     guessed_ext = ""
     low = image_url.lower()
     if low.endswith(".jpg") or low.endswith(".jpeg"):
@@ -446,7 +462,6 @@ def download_image(session: requests.Session, image_url: str) -> str | None:
     elif low.endswith(".png"):
         guessed_ext = ".png"
 
-    # si ya existe alguna versión guardada, no bajamos
     for ext in [".jpg", ".png"]:
         fp = os.path.join(IMAGES_DIR, f"{h}{ext}")
         if os.path.exists(fp) and os.path.getsize(fp) > IMAGE_MIN_BYTES:
@@ -464,7 +479,6 @@ def download_image(session: requests.Session, image_url: str) -> str | None:
     if "image" not in ct:
         return None
 
-    # solo jpeg/png
     ext = guessed_ext
     if not ext:
         if "jpeg" in ct or "jpg" in ct:
@@ -474,7 +488,6 @@ def download_image(session: requests.Session, image_url: str) -> str | None:
         else:
             return None
 
-    # bajamos con límites
     data = b""
     total = 0
     try:
@@ -491,8 +504,6 @@ def download_image(session: requests.Session, image_url: str) -> str | None:
     if total < IMAGE_MIN_BYTES:
         return None
 
-    # heurística anti-logo: muchas imágenes de logo son súper chicas
-    # (sin PIL para no complicar: usamos tamaño en bytes + hints en URL)
     if is_probably_logo_url(image_url) and total < 120_000:
         return None
 
@@ -570,28 +581,28 @@ def is_direct_image_url(u: str) -> bool:
     return u.startswith(("http://", "https://")) and u.endswith((".jpg", ".jpeg", ".png"))
 
 
-def public_image_url_from_placeholder(placeholder: str) -> str:
-    # placeholder = {{hash.jpg}}
-    fn = placeholder.strip("{} ").strip()
-    return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{fn}"
-
-
 def resolve_public_image_url(ev: dict) -> str:
     imagen = (ev.get("imagen") or "").strip()
-    if is_direct_image_url(imagen):
-        return imagen
-
     if imagen.startswith("{{") and imagen.endswith("}}"):
-        return public_image_url_from_placeholder(imagen)
+        fn = imagen.strip("{} ").strip()
+        if fn:
+            return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{fn}"
 
     imagen_archivo = (ev.get("imagen_archivo") or "").strip()
     if imagen_archivo:
         return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{imagen_archivo}"
 
+    if is_direct_image_url(imagen):
+        return imagen
+
     return ""
 
 
 def make_umap_description_md(ev: dict) -> str:
+    """
+    OJO: Para que uMap lo renderice como imagen, le metemos:
+      {{https://.../images/archivo.png}}
+    """
     colectiva = normalize(ev.get("colectiva", ""))
     convocatoria = normalize(ev.get("convocatoria", ""))
     sitio = (ev.get("sitio_web_colectiva") or "").strip()
@@ -614,13 +625,14 @@ def make_umap_description_md(ev: dict) -> str:
 
     if fecha or hora:
         if fecha and hora:
-            lines.append(f"{fecha} - {hora}")
+            lines.append(f"{fecha} - {hora[:5]}")
         else:
-            lines.append(fecha or hora)
+            lines.append((fecha or hora)[:10])
 
     img = resolve_public_image_url(ev)
     if is_direct_image_url(img):
-        lines.append(img)
+        # ✅ AQUÍ el cambio clave:
+        lines.append(f"{{{{{img}}}}}")
 
     if cta.startswith(("http://", "https://")):
         lines.append(f"[[{cta}|Accede a la convocatoria]]")
@@ -739,13 +751,13 @@ def main():
     print(f"🎯 Priority URLs: {min(len(priority), MAX_PRIORITY)}")
     print(f"🔎 Keywords: {kw_count}")
     print(f"⚡ FAST_MODE: {FAST_MODE}")
+    print(f"🗓️  MIN_EVENT_DATE: {MIN_EVENT_DATE.isoformat()}")
     print(f"🗺️  Geocoding: {GEOCODING_ENABLED} | max/run={GEOCODE_MAX_PER_RUN}")
     print(f"🖼️  Images: {IMAGES_ENABLED} | max/run={MAX_IMAGES_PER_RUN}")
 
     candidates: list[str] = []
     seen = set()
 
-    # priority primero
     for u in priority[:MAX_PRIORITY]:
         if u not in seen:
             seen.add(u)
@@ -753,7 +765,6 @@ def main():
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
-    # seed crawl en dominio
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
@@ -791,6 +802,7 @@ def main():
     images_downloaded = 0
     filled_city = 0
     filled_country = 0
+    filtered_old = 0
 
     for i, url in enumerate(candidates, start=1):
         t0 = time.time()
@@ -799,7 +811,7 @@ def main():
             elapsed = time.time() - started
             print(
                 f"⏳ {i}/{len(candidates)} | eventos:{len(records)} | geocoded:{geocoded_now} | "
-                f"imgs:{images_downloaded} | city+:{filled_city} | country+:{filled_country} | {elapsed:.1f}s"
+                f"imgs:{images_downloaded} | old_skip:{filtered_old} | {elapsed:.1f}s"
             )
 
         html = fetch_url(session, url, use_cache=True)
@@ -820,6 +832,11 @@ def main():
         if not ev:
             continue
 
+        # filtro de fechas (evita que se cuelen 2024/2019/...)
+        if not passes_date_filter(ev):
+            filtered_old += 1
+            continue
+
         ev.setdefault("pais", "")
         ev.setdefault("ciudad", "")
         ev.setdefault("direccion", "")
@@ -834,7 +851,6 @@ def main():
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
 
-        # fallback ciudad/pais
         if not normalize(ev.get("ciudad", "")):
             c = detect_city(" ".join([title, text_blob]), cities)
             if c:
@@ -850,7 +866,6 @@ def main():
         if not normalize(ev.get("localizacion_exacta", "")) and normalize(ev.get("ciudad", "")):
             ev["localizacion_exacta"] = ev["ciudad"]
 
-        # geocoding
         if GEOCODING_ENABLED and geocoded_now < GEOCODE_MAX_PER_RUN:
             lat0 = _to_float(str(ev.get("lat", "")))
             lon0 = _to_float(str(ev.get("lon", "")))
@@ -872,12 +887,8 @@ def main():
                                 geocoded_now += 1
                         time.sleep(GEOCODE_DELAY_SECONDS)
 
-        # IMAGES: intentamos sacar afiche real
         if IMAGES_ENABLED and images_downloaded < MAX_IMAGES_PER_RUN:
-            # candidato desde parse_page
             candidate = pick_best_image_candidate(parsed)
-
-            # si extractor ya traía una imagen directa, úsala como candidato también
             if not candidate:
                 if (ev.get("imagen") or "").startswith(("http://", "https://")):
                     candidate = ev["imagen"]
@@ -891,15 +902,12 @@ def main():
 
         records.append(ev)
 
-    # guardar cache geocode
     if GEOCODING_ENABLED:
         save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
         print(f"🧠 Geocode cache guardado: {GEOCODE_CACHE_PATH} | entradas: {len(geocode_cache)}")
 
-    # export master
     export_csv(EXPORT_MASTER, records, master_columns())
 
-    # export uMap + sin coord
     umap_rows = []
     sin_coord_rows = []
 
@@ -927,8 +935,7 @@ def main():
     print(f"🧾 Eventos master:        {len(records)}")
     print(f"🧾 Eventos uMap (coords): {len(umap_rows)}")
     print(f"🧾 Sin coords:            {len(sin_coord_rows)}")
-    print(f"🏙️ ciudad inferida:       {filled_city}")
-    print(f"🌍 país inferido:         {filled_country}")
+    print(f"🗑️  Filtrados por fecha (<{MIN_EVENT_DATE}): {filtered_old}")
     print(f"🖼️ imágenes descargadas:  {images_downloaded}")
     print(f"⏱️  Tiempo total: {elapsed_total:.1f}s")
 
