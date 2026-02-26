@@ -14,17 +14,18 @@ from src.extract.extractor_ai import extract_event_fields
 
 
 # =========================
-# PIPELINE PROFILE
+# PERFIL
 # =========================
-FAST_MODE = True  # mantenelo True, pero subimos límites abajo
+FAST_MODE = True
 
 
 # =========================
-# PATHS / CONFIG FILES
+# PATHS
 # =========================
 BASE_SOURCES_YML = "config/sources.yml"
 GENERATED_SOURCES_YML = "config/sources.generated.yml"
 KEYWORDS_YML = "config/keywords.yml"
+CITIES_TXT = "config/cities.txt"
 
 MASTER_CSV_PATH = "data/raw/convocatorias_2019_2025.csv"
 
@@ -39,41 +40,31 @@ PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 
 
 # =========================
-# SOURCES GENERATION
+# LIMITES (global “real” manteniendo FAST_MODE)
 # =========================
-GENERATE_SOURCES_IF_MISSING = True
-REFRESH_SOURCES_EVERY_RUN = False
-MAX_PRIORITY_URLS_FROM_CSV = 2000  # más amplio
-
-
-# =========================
-# RUNTIME LIMITS (GLOBAL)
-# =========================
-# Mantiene FAST_MODE, pero con límites “globales”
 MAX_TOTAL_CANDIDATES = 2500 if FAST_MODE else 6000
-MAX_PRIORITY = 1200 if FAST_MODE else 3000
+MAX_PRIORITY = 1500 if FAST_MODE else 3000
 MAX_SEEDS = 150 if FAST_MODE else 300
 MAX_PAGES_PER_SEED = 60 if FAST_MODE else 120
 
-TIMEOUT = (7, 20)  # (connect, read)
+TIMEOUT = (7, 20)
 DELAY_BETWEEN_REQUESTS = 0.04 if FAST_MODE else 0.08
-USER_AGENT = "geochicas-8m-global-mapper/1.1 (public observatory; contact: geochicas)"
-
+USER_AGENT = "geochicas-8m-global-mapper/1.2 (public observatory; contact: geochicas)"
 MAX_SECONDS_PER_URL = 25 if FAST_MODE else 40
 
 
 # =========================
-# GEOCODING (Nominatim)
+# GEOCODING
 # =========================
 GEOCODING_ENABLED = True
 GEOCODE_CACHE_PATH = "data/processed/geocode_cache.csv"
-GEOCODE_MAX_PER_RUN = 800 if FAST_MODE else 2000  # subimos para que uMap tenga puntos
-GEOCODE_DELAY_SECONDS = 1.05  # rate limit
+GEOCODE_MAX_PER_RUN = 900 if FAST_MODE else 2500
+GEOCODE_DELAY_SECONDS = 1.05
 NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
 
 
 # =========================
-# UTIL
+# Helpers básicos
 # =========================
 def ensure_dirs():
     os.makedirs(os.path.dirname(EXPORT_MASTER), exist_ok=True)
@@ -111,129 +102,6 @@ def dedupe_urls(urls: list[str]) -> list[str]:
             seen.add(u)
             out.append(u)
     return out
-
-
-def read_csv_urls(path: str) -> list[str]:
-    if not os.path.exists(path):
-        return []
-
-    candidates_cols = [
-        "fuente_url",
-        "cta_url",
-        "convocatoria_url",
-        "actividad_url_convocatoria",
-        "actividad_url",
-        "url",
-        "link",
-        "convocatoria",
-    ]
-
-    urls: list[str] = []
-
-    def _parse(delimiter=","):
-        nonlocal urls
-        with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
-            reader = csv.DictReader(f, delimiter=delimiter)
-            if not reader.fieldnames:
-                return
-            fieldnames = [c.strip() for c in reader.fieldnames]
-            cols = [c for c in candidates_cols if c in fieldnames]
-            if not cols:
-                return
-            for row in reader:
-                for c in cols:
-                    u = (row.get(c) or "").strip()
-                    if u.startswith(("http://", "https://")):
-                        urls.append(u)
-
-    _parse(",")
-    if not urls:
-        _parse(";")
-
-    return dedupe_urls(urls)
-
-
-def generate_sources_from_base_and_master_csv(
-    base_sources_yml: str,
-    master_csv_path: str,
-    out_generated_yml: str,
-    max_priority: int = 2000,
-):
-    base = load_yaml(base_sources_yml) or {}
-
-    seeds: list[str] = []
-    if isinstance(base, dict):
-        seeds = base.get("seeds") or []
-    elif isinstance(base, list):
-        seeds = base
-
-    seeds = [str(s).strip() for s in seeds if str(s).strip()]
-    priority_urls = read_csv_urls(master_csv_path)[:max_priority]
-
-    payload = {"seeds": seeds, "priority_urls": priority_urls}
-
-    os.makedirs(os.path.dirname(out_generated_yml), exist_ok=True)
-    with open(out_generated_yml, "w", encoding="utf-8") as f:
-        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
-
-
-def select_sources_file() -> str:
-    should_generate = (
-        REFRESH_SOURCES_EVERY_RUN
-        or (GENERATE_SOURCES_IF_MISSING and not file_exists(GENERATED_SOURCES_YML))
-    )
-
-    if should_generate and os.path.exists(MASTER_CSV_PATH):
-        print(f"🧩 Generando {GENERATED_SOURCES_YML} desde {MASTER_CSV_PATH} + {BASE_SOURCES_YML}")
-        generate_sources_from_base_and_master_csv(
-            base_sources_yml=BASE_SOURCES_YML,
-            master_csv_path=MASTER_CSV_PATH,
-            out_generated_yml=GENERATED_SOURCES_YML,
-            max_priority=MAX_PRIORITY_URLS_FROM_CSV,
-        )
-
-    if file_exists(GENERATED_SOURCES_YML):
-        return GENERATED_SOURCES_YML
-
-    return BASE_SOURCES_YML
-
-
-def read_sources_from_path(path: str):
-    y = load_yaml(path)
-    seeds: list[str] = []
-    priority: list[str] = []
-
-    if isinstance(y, dict):
-        seeds = y.get("seeds") or []
-        priority = y.get("priority_urls") or []
-    elif isinstance(y, list):
-        seeds = y
-
-    def dedupe(lst):
-        out, seen = [], set()
-        for s in lst:
-            s = str(s).strip()
-            if not s:
-                continue
-            if s not in seen:
-                seen.add(s)
-                out.append(s)
-        return out
-
-    return dedupe(seeds), dedupe(priority)
-
-
-def read_keywords_count() -> int:
-    y = load_yaml(KEYWORDS_YML)
-    if isinstance(y, list):
-        return len([x for x in y if str(x).strip()])
-    if isinstance(y, dict):
-        total = 0
-        for v in y.values():
-            if isinstance(v, list):
-                total += len([x for x in v if str(x).strip()])
-        return total
-    return 0
 
 
 def safe_filename_from_url(url: str) -> str:
@@ -324,6 +192,197 @@ def same_domain(a: str, b: str) -> bool:
         return False
 
 
+# =========================
+# Lectura seeds/priority
+# =========================
+def read_csv_urls(path: str) -> list[str]:
+    if not os.path.exists(path):
+        return []
+
+    candidates_cols = [
+        "fuente_url",
+        "cta_url",
+        "convocatoria_url",
+        "actividad_url_convocatoria",
+        "actividad_url",
+        "url",
+        "link",
+        "convocatoria",
+    ]
+
+    urls: list[str] = []
+
+    def _parse(delimiter=","):
+        nonlocal urls
+        with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+            if not reader.fieldnames:
+                return
+            fieldnames = [c.strip() for c in reader.fieldnames]
+            cols = [c for c in candidates_cols if c in fieldnames]
+            if not cols:
+                return
+            for row in reader:
+                for c in cols:
+                    u = (row.get(c) or "").strip()
+                    if u.startswith(("http://", "https://")):
+                        urls.append(u)
+
+    _parse(",")
+    if not urls:
+        _parse(";")
+
+    return dedupe_urls(urls)
+
+
+def generate_sources_from_base_and_master_csv(
+    base_sources_yml: str,
+    master_csv_path: str,
+    out_generated_yml: str,
+    max_priority: int = 2000,
+):
+    base = load_yaml(base_sources_yml) or {}
+
+    seeds: list[str] = []
+    if isinstance(base, dict):
+        seeds = base.get("seeds") or []
+    elif isinstance(base, list):
+        seeds = base
+
+    seeds = [str(s).strip() for s in seeds if str(s).strip()]
+    priority_urls = read_csv_urls(master_csv_path)[:max_priority]
+
+    payload = {"seeds": seeds, "priority_urls": priority_urls}
+
+    os.makedirs(os.path.dirname(out_generated_yml), exist_ok=True)
+    with open(out_generated_yml, "w", encoding="utf-8") as f:
+        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
+
+
+def select_sources_file() -> str:
+    should_generate = (not file_exists(GENERATED_SOURCES_YML))
+    if should_generate and os.path.exists(MASTER_CSV_PATH):
+        print(f"🧩 Generando {GENERATED_SOURCES_YML} desde {MASTER_CSV_PATH} + {BASE_SOURCES_YML}")
+        generate_sources_from_base_and_master_csv(
+            base_sources_yml=BASE_SOURCES_YML,
+            master_csv_path=MASTER_CSV_PATH,
+            out_generated_yml=GENERATED_SOURCES_YML,
+            max_priority=2000,
+        )
+    return GENERATED_SOURCES_YML if file_exists(GENERATED_SOURCES_YML) else BASE_SOURCES_YML
+
+
+def read_sources_from_path(path: str):
+    y = load_yaml(path)
+    seeds: list[str] = []
+    priority: list[str] = []
+
+    if isinstance(y, dict):
+        seeds = y.get("seeds") or []
+        priority = y.get("priority_urls") or []
+    elif isinstance(y, list):
+        seeds = y
+
+    def dedupe(lst):
+        out, seen = [], set()
+        for s in lst:
+            s = str(s).strip()
+            if not s:
+                continue
+            if s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
+
+    return dedupe(seeds), dedupe(priority)
+
+
+def read_keywords_count() -> int:
+    y = load_yaml(KEYWORDS_YML)
+    if isinstance(y, list):
+        return len([x for x in y if str(x).strip()])
+    if isinstance(y, dict):
+        total = 0
+        for v in y.values():
+            if isinstance(v, list):
+                total += len([x for x in v if str(x).strip()])
+        return total
+    return 0
+
+
+# =========================
+# City + Country inference
+# =========================
+def load_cities(path: str) -> list[str]:
+    if not os.path.exists(path):
+        return []
+    cities = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            cities.append(s)
+    # primero las más largas (evita match “San” antes de “San José”)
+    cities.sort(key=lambda x: len(x), reverse=True)
+    return cities
+
+
+def detect_city(text: str, cities: list[str]) -> str | None:
+    if not text or not cities:
+        return None
+    t = " " + normalize(text).lower() + " "
+    for city in cities:
+        c = city.lower()
+        # palabra completa (aprox)
+        if re.search(rf"(?<!\w){re.escape(c)}(?!\w)", t):
+            return city
+    return None
+
+
+TLD_TO_COUNTRY = {
+    "fr": "France",
+    "es": "España",
+    "mx": "México",
+    "ar": "Argentina",
+    "cl": "Chile",
+    "co": "Colombia",
+    "pe": "Perú",
+    "br": "Brasil",
+    "uy": "Uruguay",
+    "bo": "Bolivia",
+    "ec": "Ecuador",
+    "cr": "Costa Rica",
+    "gt": "Guatemala",
+    "hn": "Honduras",
+    "sv": "El Salvador",
+    "ni": "Nicaragua",
+    "pa": "Panamá",
+    "do": "República Dominicana",
+    "ve": "Venezuela",
+    "it": "Italia",
+    "de": "Deutschland",
+    "uk": "United Kingdom",
+    "pt": "Portugal",
+    "cat": "Catalunya",
+}
+
+
+def infer_country_from_url(url: str) -> str | None:
+    try:
+        host = urlparse(url).netloc.lower()
+        parts = host.split(".")
+        if not parts:
+            return None
+        tld = parts[-1]
+        return TLD_TO_COUNTRY.get(tld)
+    except Exception:
+        return None
+
+
+# =========================
+# Export helpers
+# =========================
 def master_columns() -> list[str]:
     return [
         "colectiva",
@@ -388,7 +447,6 @@ def make_umap_popup_html(ev: dict, public_base_url: str = "") -> str:
     titulo = colectiva or convocatoria_titulo or "Convocatoria 8M"
 
     convocatoria_url = (ev.get("cta_url") or ev.get("fuente_url") or "").strip()
-
     direccion = (ev.get("direccion") or ev.get("localizacion_exacta") or "").strip()
     fecha = (ev.get("fecha") or "").strip()
     hora = (ev.get("hora") or "").strip()
@@ -405,41 +463,35 @@ def make_umap_popup_html(ev: dict, public_base_url: str = "") -> str:
         imagen = f"{public_base_url.rstrip('/')}/images/{imagen_archivo}"
 
     parts = []
-
     if convocatoria_url:
         parts.append(
             f'<h3 style="margin:0 0 8px 0;">'
-            f'<a href="{convocatoria_url}" target="_blank" rel="noopener noreferrer">'
-            f'{esc(titulo)}</a></h3>'
+            f'<a href="{convocatoria_url}" target="_blank" rel="noopener noreferrer">{esc(titulo)}</a>'
+            f"</h3>"
         )
     else:
         parts.append(f'<h3 style="margin:0 0 8px 0;">{esc(titulo)}</h3>')
 
     if direccion:
         parts.append(f'<p style="margin:0 0 10px 0;">{esc(direccion)}</p>')
-
     if fecha_hora:
         parts.append(f'<p style="margin:0 0 14px 0;">{esc(fecha_hora)}</p>')
-
     if imagen:
         parts.append(
             '<div style="margin:0 0 12px 0;">'
             f'<img src="{imagen}" style="max-width:100%; height:auto; border-radius:4px;" />'
-            '</div>'
+            "</div>"
         )
-
     if convocatoria_url:
         parts.append(
-            f'<p style="margin:0;">'
-            f'<a href="{convocatoria_url}" target="_blank" rel="noopener noreferrer">'
-            f'Accede a la convocatoria</a></p>'
+            f'<p style="margin:0;"><a href="{convocatoria_url}" target="_blank" rel="noopener noreferrer">'
+            "Accede a la convocatoria</a></p>"
         )
-
     return "\n".join(parts).strip()
 
 
 # =========================
-# uMap strict helpers
+# lat/lon strict
 # =========================
 def _to_float(s: str):
     s = (s or "").strip()
@@ -502,19 +554,13 @@ def build_geocode_query(ev: dict) -> str:
         parts.append(ciudad)
     if pais:
         parts.append(pais)
-
     return ", ".join([p for p in parts if p]).strip()
 
 
 def geocode_nominatim(session: requests.Session, query: str) -> tuple[str, str] | None:
     if not query:
         return None
-
-    params = {
-        "q": query,
-        "format": "json",
-        "limit": 1,
-    }
+    params = {"q": query, "format": "json", "limit": 1}
     try:
         r = session.get(
             NOMINATIM_ENDPOINT,
@@ -543,6 +589,9 @@ def main():
     ensure_dirs()
     session = make_session()
 
+    cities = load_cities(CITIES_TXT)
+    print(f"🏙️ cities loaded: {len(cities)}")
+
     sources_path = select_sources_file()
     seeds, priority = read_sources_from_path(sources_path)
     kw_count = read_keywords_count()
@@ -557,7 +606,7 @@ def main():
     candidates: list[str] = []
     seen = set()
 
-    # Priority primero (histórico)
+    # Priority primero
     for u in priority[:MAX_PRIORITY]:
         if u not in seen:
             seen.add(u)
@@ -595,32 +644,34 @@ def main():
     print(f"🔎 Candidates total: {len(candidates)}")
 
     records: list[dict] = []
-    n_fetch_ok = 0
-    n_events = 0
     started = time.time()
 
     geocode_cache = load_geocode_cache(GEOCODE_CACHE_PATH)
     geocoded_now = 0
 
+    # contadores de debug
+    filled_city = 0
+    filled_country = 0
+
     for i, url in enumerate(candidates, start=1):
         t0 = time.time()
 
-        if i % 50 == 0:
+        if i % 100 == 0:
             elapsed = time.time() - started
             print(
-                f"⏳ {i}/{len(candidates)} | eventos:{n_events} | fetch_ok:{n_fetch_ok} | "
-                f"geocoded:{geocoded_now} | {elapsed:.1f}s"
+                f"⏳ {i}/{len(candidates)} | eventos:{len(records)} | geocoded:{geocoded_now} | "
+                f"city+:{filled_city} | country+:{filled_country} | {elapsed:.1f}s"
             )
 
         html = fetch_url(session, url, use_cache=True)
         if html is None:
             continue
-        n_fetch_ok += 1
-
         if (time.time() - t0) > MAX_SECONDS_PER_URL:
             continue
 
         parsed = parse_page(url, html)
+        text_blob = normalize(parsed.get("text", "")) if isinstance(parsed, dict) else ""
+        title = normalize(parsed.get("title", "")) if isinstance(parsed, dict) else ""
 
         try:
             ev = extract_event_fields(parsed)
@@ -630,12 +681,37 @@ def main():
         if not ev:
             continue
 
+        # defaults
+        ev.setdefault("pais", "")
+        ev.setdefault("ciudad", "")
+        ev.setdefault("direccion", "")
+        ev.setdefault("localizacion_exacta", "")
+        ev.setdefault("lat", "")
+        ev.setdefault("lon", "")
+
         ev["fuente_url"] = url
         ev["fuente_tipo"] = "web"
         ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
         ev["imagen_archivo"] = ev.get("imagen_archivo", "")
 
-        # Geocoding si falta lat/lon
+        # ====== Fallback: ciudad / país ======
+        if not normalize(ev.get("ciudad", "")):
+            c = detect_city(" ".join([title, text_blob]), cities)
+            if c:
+                ev["ciudad"] = c
+                filled_city += 1
+
+        if not normalize(ev.get("pais", "")):
+            p = infer_country_from_url(url)
+            if p:
+                ev["pais"] = p
+                filled_country += 1
+
+        # si no hay dirección pero hay ciudad, al menos guardá ciudad como localización aproximada
+        if not normalize(ev.get("localizacion_exacta", "")) and normalize(ev.get("ciudad", "")):
+            ev["localizacion_exacta"] = ev["ciudad"]
+
+        # ====== Geocoding ======
         if GEOCODING_ENABLED and geocoded_now < GEOCODE_MAX_PER_RUN:
             lat0 = _to_float(str(ev.get("lat", "")))
             lon0 = _to_float(str(ev.get("lon", "")))
@@ -658,9 +734,7 @@ def main():
                         time.sleep(GEOCODE_DELAY_SECONDS)
 
         ev["popup_html"] = make_umap_popup_html(ev, public_base_url=PUBLIC_BASE_URL)
-
         records.append(ev)
-        n_events += 1
 
     if GEOCODING_ENABLED:
         save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
@@ -669,22 +743,18 @@ def main():
     # Export master
     export_csv(EXPORT_MASTER, records, master_columns())
 
-    # Export uMap strict + export sin coordenadas
+    # Export uMap + sin coord
     umap_rows = []
     sin_coord_rows = []
-    invalid = 0
-
     for r in records:
         lat = _to_float(str(r.get("lat", "")))
         lon = _to_float(str(r.get("lon", "")))
-
         if _valid_latlon(lat, lon):
             r2 = dict(r)
             r2["lat"] = f"{lat:.6f}"
             r2["lon"] = f"{lon:.6f}"
             umap_rows.append(r2)
         else:
-            invalid += 1
             sin_coord_rows.append(dict(r))
 
     export_csv(EXPORT_UMAP, umap_rows, umap_columns())
@@ -694,10 +764,11 @@ def main():
     print(f"\n📄 CSV master:    {EXPORT_MASTER}")
     print(f"📄 CSV uMap:      {EXPORT_UMAP}")
     print(f"📄 CSV sin coord: {EXPORT_SIN_COORD}")
-    print(f"🧾 Eventos exportados (master):    {len(records)}")
-    print(f"🧾 Eventos exportados (uMap):      {len(umap_rows)}")
-    print(f"🧾 Eventos sin coordenadas:        {len(sin_coord_rows)}")
-    print(f"🧹 uMap strict descartadas:        {invalid}")
+    print(f"🧾 Eventos master:        {len(records)}")
+    print(f"🧾 Eventos uMap (coords): {len(umap_rows)}")
+    print(f"🧾 Sin coords:            {len(sin_coord_rows)}")
+    print(f"🏙️ ciudad inferida:       {filled_city}")
+    print(f"🌍 país inferido:         {filled_country}")
     print(f"⏱️  Tiempo total: {elapsed_total:.1f}s")
 
 
