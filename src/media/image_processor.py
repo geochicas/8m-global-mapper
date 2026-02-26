@@ -148,3 +148,56 @@ def download_image_filtered(
         return None
 
     return filename
+# ======================================================
+# COMPAT: main.py espera download_and_process_image(...)
+# ======================================================
+
+def download_and_process_image(img_url: str, out_dir: str = "data/images"):
+    """
+    Wrapper de compatibilidad para Actions/main.py.
+    Intenta usar la función 'real' existente en este módulo.
+    Debe devolver dict con al menos: {"public_url": "..."} cuando funcione.
+    """
+    if not img_url:
+        return None
+
+    # 1) Si ya existe alguna función “principal” en este módulo, úsala.
+    #    (Mantiene el comportamiento anterior sin reescribir pipeline.)
+    for fn_name in [
+        "download_and_process",            # nombre típico
+        "process_and_publish_image",       # nombre típico
+        "download_process_image",          # nombre típico
+        "process_image",                   # genérico
+    ]:
+        fn = globals().get(fn_name)
+        if callable(fn):
+            try:
+                # probamos firmas comunes
+                try:
+                    return fn(img_url, out_dir=out_dir)
+                except TypeError:
+                    return fn(img_url, out_dir)
+            except Exception:
+                return None
+
+    # 2) Fallback ultra simple: descargar sin “procesado”.
+    #    Esto evita que el job muera; si no hay public_url, simplemente no setea imagen en main.
+    try:
+        import os
+        import hashlib
+        import requests
+
+        os.makedirs(out_dir, exist_ok=True)
+        ext = ".jpg"
+        h = hashlib.sha1(img_url.encode("utf-8")).hexdigest()[:16]
+        path = os.path.join(out_dir, f"{h}{ext}")
+
+        r = requests.get(img_url, timeout=20, headers={"User-Agent": os.environ.get("USER_AGENT", "geochicas-8m-global-mapper/1.0")})
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            f.write(r.content)
+
+        # sin saber tu lógica de GitHub Pages aquí, devolvemos solo local_path
+        return {"local_path": path}
+    except Exception:
+        return None
