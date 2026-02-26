@@ -37,3 +37,66 @@ def export_csv(records, out_path):
             row = {k: r.get(k, "") for k in COLUMNS}
             row["imagen"] = _format_image_for_umap(row.get("imagen", ""))
             writer.writerow(row)
+
+# ======================================================
+# COMPAT: main.py espera export_master_csv / export_umap_csv / export_sin_coord_csv
+# ======================================================
+
+def export_master_csv(path: str, rows: list[dict]):
+    """
+    Wrapper compat. Intenta llamar a la función real existente.
+    """
+    for fn_name in ["export_master", "write_master_csv", "export_csv_master", "export_csv"]:
+        fn = globals().get(fn_name)
+        if callable(fn):
+            try:
+                return fn(path, rows)
+            except TypeError:
+                pass
+    # fallback: si el módulo ya tiene un export_csv genérico con (path, rows, columns)
+    fn = globals().get("export_csv")
+    if callable(fn):
+        # intenta detectar columnas por union de llaves
+        cols = []
+        seen = set()
+        for r in rows or []:
+            for k in (r or {}).keys():
+                if k not in seen:
+                    seen.add(k)
+                    cols.append(k)
+        return fn(path, rows, cols)
+    raise ImportError("No se encontró función base para export_master_csv en src/export/to_csv.py")
+
+
+def export_umap_csv(path: str, rows: list[dict], min_score: int = 10):
+    """
+    Wrapper compat. Intenta llamar a la función real existente.
+    """
+    for fn_name in ["export_umap", "write_umap_csv", "export_csv_umap"]:
+        fn = globals().get(fn_name)
+        if callable(fn):
+            try:
+                return fn(path, rows, min_score=min_score)
+            except TypeError:
+                try:
+                    return fn(path, rows, min_score)
+                except TypeError:
+                    return fn(path, rows)
+    raise ImportError("No se encontró función base para export_umap_csv en src/export/to_csv.py")
+
+
+def export_sin_coord_csv(path: str, rows: list[dict], min_score: int = 10):
+    """
+    Wrapper compat. Intenta llamar a la función real existente.
+    """
+    for fn_name in ["export_sin_coord", "write_sin_coord_csv", "export_csv_sin_coord", "export_without_coords"]:
+        fn = globals().get(fn_name)
+        if callable(fn):
+            try:
+                return fn(path, rows, min_score=min_score)
+            except TypeError:
+                try:
+                    return fn(path, rows, min_score)
+                except TypeError:
+                    return fn(path, rows)
+    raise ImportError("No se encontró función base para export_sin_coord_csv en src/export/to_csv.py")
