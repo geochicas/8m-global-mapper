@@ -45,8 +45,12 @@ PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
 # FECHAS (FILTRO)
 # =========================
 # Mantener solo eventos a partir de este día (YYYY-MM-DD).
-# Recomendación práctica: 2025-01-01 para ciclo 2025/2026.
 MIN_EVENT_DATE = date(2025, 1, 1)
+
+# Año “actual” para reglas de plausibilidad
+TODAY = date.today()
+MIN_REASONABLE_YEAR = TODAY.year - 1
+MAX_REASONABLE_YEAR = TODAY.year + 1
 
 
 # =========================
@@ -59,7 +63,7 @@ MAX_PAGES_PER_SEED = 60 if FAST_MODE else 120
 
 TIMEOUT = (7, 20)
 DELAY_BETWEEN_REQUESTS = 0.04 if FAST_MODE else 0.08
-USER_AGENT = "geochicas-8m-global-mapper/1.5 (public observatory; contact: geochicas)"
+USER_AGENT = "geochicas-8m-global-mapper/1.6 (public observatory; contact: geochicas)"
 MAX_SECONDS_PER_URL = 25 if FAST_MODE else 40
 
 
@@ -74,7 +78,7 @@ NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
 
 
 # =========================
-# IMAGES (PUBLICACIÓN)
+# IMAGES
 # =========================
 IMAGES_ENABLED = True
 MAX_IMAGES_PER_RUN = 250 if FAST_MODE else 1500
@@ -219,7 +223,7 @@ def same_domain(a: str, b: str) -> bool:
 
 
 # =========================
-# Seeds / Priority
+# Sources
 # =========================
 def read_csv_urls(path: str) -> list[str]:
     if not os.path.exists(path):
@@ -336,7 +340,7 @@ def read_keywords_count() -> int:
 
 
 # =========================
-# City + Country inference
+# City list
 # =========================
 def load_cities(path: str) -> list[str]:
     if not os.path.exists(path):
@@ -363,6 +367,9 @@ def detect_city(text: str, cities: list[str]) -> str | None:
     return None
 
 
+# =========================
+# Country inference (simple)
+# =========================
 TLD_TO_COUNTRY = {
     "fr": "France",
     "es": "España",
@@ -404,29 +411,78 @@ def infer_country_from_url(url: str) -> str | None:
 
 
 # =========================
-# FECHA: parse + filtro
+# FECHA: parse + heurísticas
 # =========================
 def parse_iso_date(s: str) -> date | None:
     s = (s or "").strip()
     if not s:
         return None
-    # esperamos YYYY-MM-DD (como tu dataset)
     try:
         return datetime.strptime(s[:10], "%Y-%m-%d").date()
     except Exception:
         return None
 
 
-def passes_date_filter(ev: dict) -> bool:
+def extract_year_hints(url: str, title: str) -> list[int]:
+    blob = f"{url} {title}".lower()
+    years = []
+    for m in re.finditer(r"(20\d{2})", blob):
+        try:
+            y = int(m.group(1))
+            if 2015 <= y <= 2035:
+                years.append(y)
+        except Exception:
+            pass
+    # dedupe manteniendo orden
+    out = []
+    for y in years:
+        if y not in out:
+            out.append(y)
+    return out
+
+
+def apply_year_hint(ev: dict, url: str, title: str) -> dict:
+    """
+    Si el título/URL grita "2024" pero el extractor inventó 2026-02-26, corregimos el año.
+    Luego el filtro MIN_EVENT_DATE lo elimina si corresponde.
+    """
+    hints = extract_year_hints(url, title)
+    if not hints:
+        return ev
+
     d = parse_iso_date(ev.get("fecha", ""))
     if not d:
-        # si no hay fecha, lo dejamos pasar (para no perder eventos) — ajustable
+        return ev
+
+    # preferimos el primer hint que aparezca (típicamente el más relevante)
+    y_hint = hints[0]
+    if d.year != y_hint:
+        try:
+            ev["fecha"] = date(y_hint, d.month, d.day).isoformat()
+        except Exception:
+            # si esa combinación no existe (29 feb), no tocamos
+            pass
+    return ev
+
+
+def passes_date_filter(ev: dict, url: str, title: str) -> bool:
+    d = parse_iso_date(ev.get("fecha", ""))
+    if not d:
+        # Si no hay fecha pero el título/URL dice 2024, lo descartamos.
+        hints = extract_year_hints(url, title)
+        if hints and hints[0] < MIN_EVENT_DATE.year:
+            return False
         return True
+
+    # plausibilidad: evita fechas absurdas (p.ej. 5500)
+    if d.year < MIN_REASONABLE_YEAR or d.year > MAX_REASONABLE_YEAR:
+        return False
+
     return d >= MIN_EVENT_DATE
 
 
 # =========================
-# IMAGE selection + download
+# IMAGES
 # =========================
 def is_probably_logo_url(u: str) -> bool:
     s = (u or "").lower()
@@ -504,6 +560,7 @@ def download_image(session: requests.Session, image_url: str) -> str | None:
     if total < IMAGE_MIN_BYTES:
         return None
 
+    # anti-logo suave
     if is_probably_logo_url(image_url) and total < 120_000:
         return None
 
@@ -518,62 +575,11 @@ def download_image(session: requests.Session, image_url: str) -> str | None:
     return fn
 
 
-# =========================
-# Export helpers
-# =========================
-def master_columns() -> list[str]:
-    return [
-        "colectiva",
-        "convocatoria",
-        "descripcion",
-        "fecha",
-        "hora",
-        "pais",
-        "ciudad",
-        "localizacion_exacta",
-        "direccion",
-        "lat",
-        "lon",
-        "imagen",
-        "imagen_archivo",
-        "cta_url",
-        "sitio_web_colectiva",
-        "trans_incluyente",
-        "fuente_url",
-        "fuente_tipo",
-        "confianza_extraccion",
-        "precision_ubicacion",
-        "score_relevancia",
-    ]
-
-
-def umap_columns() -> list[str]:
-    return [
-        "name",
-        "description",
-        "lat",
-        "lon",
-        "colectiva",
-        "convocatoria",
-        "direccion",
-        "fecha",
-        "hora",
-        "imagen",
-        "cta_url",
-        "fuente_url",
-        "score_relevancia",
-    ]
-
-
-def export_csv(path: str, rows: list[dict], columns: list[str]):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
-        w.writeheader()
-        for r in rows:
-            for c in columns:
-                r.setdefault(c, "")
-            w.writerow(r)
+def local_image_exists(filename: str) -> bool:
+    if not filename:
+        return False
+    fp = os.path.join(IMAGES_DIR, filename)
+    return os.path.exists(fp) and os.path.getsize(fp) > IMAGE_MIN_BYTES
 
 
 def is_direct_image_url(u: str) -> bool:
@@ -582,27 +588,20 @@ def is_direct_image_url(u: str) -> bool:
 
 
 def resolve_public_image_url(ev: dict) -> str:
-    imagen = (ev.get("imagen") or "").strip()
-    if imagen.startswith("{{") and imagen.endswith("}}"):
-        fn = imagen.strip("{} ").strip()
-        if fn:
-            return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{fn}"
-
+    """
+    CLAVE: solo construimos URL de Pages si el archivo EXISTE localmente.
+    Así evitamos 404.
+    """
     imagen_archivo = (ev.get("imagen_archivo") or "").strip()
-    if imagen_archivo:
+    if imagen_archivo and local_image_exists(imagen_archivo):
         return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{imagen_archivo}"
 
-    if is_direct_image_url(imagen):
-        return imagen
-
+    # Si no hay archivo local, NO inventamos una URL de Pages.
+    # (Podrías optar por hotlink directo a og:image, pero eso rompe menos el popup si la web cambia.)
     return ""
 
 
 def make_umap_description_md(ev: dict) -> str:
-    """
-    OJO: Para que uMap lo renderice como imagen, le metemos:
-      {{https://.../images/archivo.png}}
-    """
     colectiva = normalize(ev.get("colectiva", ""))
     convocatoria = normalize(ev.get("convocatoria", ""))
     sitio = (ev.get("sitio_web_colectiva") or "").strip()
@@ -631,7 +630,7 @@ def make_umap_description_md(ev: dict) -> str:
 
     img = resolve_public_image_url(ev)
     if is_direct_image_url(img):
-        # ✅ AQUÍ el cambio clave:
+        # ✅ uMap renderiza como imagen si va dentro de {{ }}
         lines.append(f"{{{{{img}}}}}")
 
     if cta.startswith(("http://", "https://")):
@@ -733,14 +732,68 @@ def geocode_nominatim(session: requests.Session, query: str) -> tuple[str, str] 
 
 
 # =========================
+# Export helpers
+# =========================
+def master_columns() -> list[str]:
+    return [
+        "colectiva",
+        "convocatoria",
+        "descripcion",
+        "fecha",
+        "hora",
+        "pais",
+        "ciudad",
+        "localizacion_exacta",
+        "direccion",
+        "lat",
+        "lon",
+        "imagen_archivo",
+        "cta_url",
+        "sitio_web_colectiva",
+        "trans_incluyente",
+        "fuente_url",
+        "fuente_tipo",
+        "confianza_extraccion",
+        "precision_ubicacion",
+        "score_relevancia",
+    ]
+
+
+def umap_columns() -> list[str]:
+    return [
+        "name",
+        "description",
+        "lat",
+        "lon",
+        "colectiva",
+        "convocatoria",
+        "direccion",
+        "fecha",
+        "hora",
+        "cta_url",
+        "fuente_url",
+        "score_relevancia",
+    ]
+
+
+def export_csv(path: str, rows: list[dict], columns: list[str]):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            for c in columns:
+                r.setdefault(c, "")
+            w.writerow(r)
+
+
+# =========================
 # MAIN
 # =========================
 def main():
     ensure_dirs()
     session = make_session()
-
     cities = load_cities(CITIES_TXT)
-    print(f"🏙️ cities loaded: {len(cities)}")
 
     sources_path = select_sources_file()
     seeds, priority = read_sources_from_path(sources_path)
@@ -768,11 +821,9 @@ def main():
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
-
         html = fetch_url(session, seed, use_cache=True)
         if not html:
             continue
-
         links = extract_links(seed, html)
         picked = 0
         for link in links:
@@ -787,7 +838,6 @@ def main():
             picked += 1
             if picked >= MAX_PAGES_PER_SEED:
                 break
-
         if picked:
             print(f"🔗 {seed} -> candidatos (seed crawl): {picked}")
 
@@ -798,10 +848,7 @@ def main():
 
     geocode_cache = load_geocode_cache(GEOCODE_CACHE_PATH)
     geocoded_now = 0
-
     images_downloaded = 0
-    filled_city = 0
-    filled_country = 0
     filtered_old = 0
 
     for i, url in enumerate(candidates, start=1):
@@ -832,8 +879,11 @@ def main():
         if not ev:
             continue
 
-        # filtro de fechas (evita que se cuelen 2024/2019/...)
-        if not passes_date_filter(ev):
+        # corrigir año si hay hint fuerte (2024 en título/URL)
+        ev = apply_year_hint(ev, url, title)
+
+        # filtro de fechas (mejorado)
+        if not passes_date_filter(ev, url, title):
             filtered_old += 1
             continue
 
@@ -844,7 +894,6 @@ def main():
         ev.setdefault("lat", "")
         ev.setdefault("lon", "")
         ev.setdefault("sitio_web_colectiva", "")
-        ev.setdefault("imagen", "")
         ev.setdefault("imagen_archivo", "")
 
         ev["fuente_url"] = url
@@ -855,13 +904,11 @@ def main():
             c = detect_city(" ".join([title, text_blob]), cities)
             if c:
                 ev["ciudad"] = c
-                filled_city += 1
 
         if not normalize(ev.get("pais", "")):
             p = infer_country_from_url(url)
             if p:
                 ev["pais"] = p
-                filled_country += 1
 
         if not normalize(ev.get("localizacion_exacta", "")) and normalize(ev.get("ciudad", "")):
             ev["localizacion_exacta"] = ev["ciudad"]
@@ -887,24 +934,19 @@ def main():
                                 geocoded_now += 1
                         time.sleep(GEOCODE_DELAY_SECONDS)
 
+        # Descargar imagen solo si vale la pena
         if IMAGES_ENABLED and images_downloaded < MAX_IMAGES_PER_RUN:
             candidate = pick_best_image_candidate(parsed)
-            if not candidate:
-                if (ev.get("imagen") or "").startswith(("http://", "https://")):
-                    candidate = ev["imagen"]
-
             if candidate and candidate.startswith(("http://", "https://")):
                 fn = download_image(session, candidate)
                 if fn:
                     ev["imagen_archivo"] = fn
-                    ev["imagen"] = f"{{{{{fn}}}}}"
                     images_downloaded += 1
 
         records.append(ev)
 
     if GEOCODING_ENABLED:
         save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
-        print(f"🧠 Geocode cache guardado: {GEOCODE_CACHE_PATH} | entradas: {len(geocode_cache)}")
 
     export_csv(EXPORT_MASTER, records, master_columns())
 
@@ -934,8 +976,7 @@ def main():
     print(f"📄 CSV sin coord: {EXPORT_SIN_COORD}")
     print(f"🧾 Eventos master:        {len(records)}")
     print(f"🧾 Eventos uMap (coords): {len(umap_rows)}")
-    print(f"🧾 Sin coords:            {len(sin_coord_rows)}")
-    print(f"🗑️  Filtrados por fecha (<{MIN_EVENT_DATE}): {filtered_old}")
+    print(f"🗑️  Filtrados por fecha:  {filtered_old}")
     print(f"🖼️ imágenes descargadas:  {images_downloaded}")
     print(f"⏱️  Tiempo total: {elapsed_total:.1f}s")
 
