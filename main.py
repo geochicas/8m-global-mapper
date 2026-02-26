@@ -1,342 +1,199 @@
+# main.py — 8m-global-mapper
+# Mantiene el pipeline existente:
+# - merge de sources (base/generated/feminist)
+# - priority URLs desde master CSV
+# - crawl por seeds (same-domain)
+# - parse + extract + score + reglas + fecha mínima
+# - geocode + cache
+# - descarga de imagen + filtro anti-logo/footer
+# - export master + umap + sin_coord
+# - archivos para GitHub Pages (Actions)
+#
+# Cambio clave aquí:
+# - sources.yml puede ser ANIDADO (región/tema/urls/social/hashtags)
+# - hashtags se incorporan como keywords extra (para scoring/matching)
+# - social no se scrapea por defecto (ENABLE_SOCIAL_SEEDS=false)
+
+from __future__ import annotations
+
 import csv
 import os
 import re
+import sys
 import time
 import hashlib
 from datetime import date, datetime
-from urllib.parse import urljoin, urlparse
 
-import requests
 import yaml
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
+# --- módulos del repo ---
+from src.collect.web_fetch import make_session, fetch_url
+from src.collect.discover_links import extract_links, same_domain
 from src.parse.html_parser import parse_page
 from src.extract.extractor_ai import extract_event_fields
+from src.geocode.geocoder import geocode_event, load_geocode_cache, save_geocode_cache
+from src.media.image_processor import download_and_process_image
+from src.export.to_csv import export_master_csv, export_umap_csv, export_sin_coord_csv
+
+from src.collect.sources_loader import load_sources, should_include_social_seeds
 
 
 # =========================
-# PERFIL
-# =========================
-FAST_MODE = True
-
-
-# =========================
-# PATHS
+# Paths / Config
 # =========================
 BASE_SOURCES_YML = "config/sources.yml"
 GENERATED_SOURCES_YML = "config/sources.generated.yml"
+FEMINIST_SOURCES_YML = "config/sources.feminist.yml"
+
 KEYWORDS_YML = "config/keywords.yml"
 CITIES_TXT = "config/cities.txt"
+DOMAIN_RULES_YML = "config/domain_rules.yml"
 
-MASTER_CSV_PATH = "data/raw/convocatorias_2019_2025.csv"
+MASTER_CSV_PATH = "data/exports/mapa_8m_global_master.csv"
 
 EXPORT_MASTER = "data/exports/mapa_8m_global_master.csv"
 EXPORT_UMAP = "data/exports/mapa_8m_global_umap.csv"
 EXPORT_SIN_COORD = "data/exports/mapa_8m_global_sin_coord.csv"
 
-CACHE_DIR = "data/raw/html_cache"
 IMAGES_DIR = "data/images"
+GEOCODE_CACHE_PATH = "data/processed/geocode_cache.json"
 
-PUBLIC_BASE_URL = "https://geochicas.github.io/8m-global-mapper"
+# =========================
+# Tunables
+# =========================
+FAST_MODE = os.environ.get("FAST_MODE", "true").strip().lower() in ("1", "true", "yes", "y", "on")
+
+MAX_SEEDS = int(os.environ.get("MAX_SEEDS", "220"))            # cuántos seeds usar
+MAX_PRIORITY = int(os.environ.get("MAX_PRIORITY", "750"))      # cuántas priority urls
+MAX_TOTAL_CANDIDATES = int(os.environ.get("MAX_TOTAL_CANDIDATES", "3000"))
+
+MAX_PAGES_PER_SEED = int(os.environ.get("MAX_PAGES_PER_SEED", "60" if FAST_MODE else "120"))
+
+REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "20"))
+SLEEP_EVERY = int(os.environ.get("SLEEP_EVERY", "0"))  # 0 = no sleep
+
+THRESHOLD_EXTRACT = int(os.environ.get("THRESHOLD_EXTRACT", "6"))
+THRESHOLD_EXPORT_UMAP = int(os.environ.get("THRESHOLD_EXPORT_UMAP", "10"))
+
+MIN_EVENT_DATE = date.fromisoformat(os.environ.get("MIN_EVENT_DATE", "2025-01-01"))
 
 
 # =========================
-# FECHAS (FILTRO)
-# =========================
-# Mantener solo eventos a partir de este día (YYYY-MM-DD).
-MIN_EVENT_DATE = date(2025, 1, 1)
-
-# Año “actual” para reglas de plausibilidad
-TODAY = date.today()
-MIN_REASONABLE_YEAR = TODAY.year - 1
-MAX_REASONABLE_YEAR = TODAY.year + 1
-
-
-# =========================
-# LIMITES
-# =========================
-MAX_TOTAL_CANDIDATES = 2500 if FAST_MODE else 6000
-MAX_PRIORITY = 1500 if FAST_MODE else 3000
-MAX_SEEDS = 150 if FAST_MODE else 300
-MAX_PAGES_PER_SEED = 60 if FAST_MODE else 120
-
-TIMEOUT = (7, 20)
-DELAY_BETWEEN_REQUESTS = 0.04 if FAST_MODE else 0.08
-USER_AGENT = "geochicas-8m-global-mapper/1.6 (public observatory; contact: geochicas)"
-MAX_SECONDS_PER_URL = 25 if FAST_MODE else 40
-
-
-# =========================
-# GEOCODING
-# =========================
-GEOCODING_ENABLED = True
-GEOCODE_CACHE_PATH = "data/processed/geocode_cache.csv"
-GEOCODE_MAX_PER_RUN = 900 if FAST_MODE else 2500
-GEOCODE_DELAY_SECONDS = 1.05
-NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
-
-
-# =========================
-# IMAGES
-# =========================
-IMAGES_ENABLED = True
-MAX_IMAGES_PER_RUN = 250 if FAST_MODE else 1500
-IMAGE_TIMEOUT = (7, 25)
-IMAGE_MIN_BYTES = 20_000
-IMAGE_MAX_BYTES = 6_000_000
-BLOCKLIST_IMAGE_HINTS = [
-    "logo", "icon", "sprite", "favicon", "apple-touch-icon", "site-icon",
-    "header", "footer", "navbar", "menu", "brand", "badge", "avatar"
-]
-
-
-# =========================
-# Helpers básicos
+# Utils
 # =========================
 def ensure_dirs():
-    os.makedirs(os.path.dirname(EXPORT_MASTER), exist_ok=True)
-    os.makedirs(os.path.dirname(GEOCODE_CACHE_PATH), exist_ok=True)
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    os.makedirs("data/raw", exist_ok=True)
+    os.makedirs("data/processed", exist_ok=True)
+    os.makedirs("data/exports", exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
     os.makedirs("config", exist_ok=True)
 
 
-def load_yaml(path: str):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        return {}
-    except Exception:
-        return {}
-
-
-def normalize(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip()
-
-
 def file_exists(p: str) -> bool:
-    return os.path.exists(p) and os.path.getsize(p) > 10
+    return os.path.exists(p) and os.path.getsize(p) > 0
+
+
+def load_yaml(path: str):
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 def dedupe_urls(urls: list[str]) -> list[str]:
-    out, seen = [], set()
+    seen = set()
+    out = []
     for u in urls:
         u = (u or "").strip()
         if not u:
             continue
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
+        if u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
     return out
 
 
-def sha1(s: str) -> str:
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
-
-
-def safe_filename_from_url(url: str) -> str:
-    return f"{sha1(url)}.html"
-
-
-def make_session():
-    s = requests.Session()
-    retries = Retry(
-        total=1 if FAST_MODE else 2,
-        backoff_factor=0.35,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-        raise_on_status=False,
-    )
-    adapter = HTTPAdapter(max_retries=retries)
-    s.mount("http://", adapter)
-    s.mount("https://", adapter)
+def normalize(s: str) -> str:
+    if not s:
+        return ""
+    s = s.replace("\u00a0", " ")
+    s = re.sub(r"\s+", " ", s).strip()
     return s
 
 
-def is_html_content_type(ct: str) -> bool:
-    ct = (ct or "").lower()
-    return ("text/html" in ct) or ("application/xhtml" in ct) or ct == ""
-
-
-def fetch_url(session, url: str, use_cache: bool = True) -> str | None:
-    cache_path = os.path.join(CACHE_DIR, safe_filename_from_url(url))
-
-    if use_cache and os.path.exists(cache_path) and os.path.getsize(cache_path) > 50:
-        try:
-            with open(cache_path, "r", encoding="utf-8", errors="ignore") as f:
-                return f.read()
-        except Exception:
-            pass
-
-    try:
-        r = session.get(
-            url,
-            timeout=TIMEOUT,
-            headers={"User-Agent": USER_AGENT},
-            allow_redirects=True,
-        )
-    except Exception:
-        return None
-
-    ct = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
-    if not is_html_content_type(ct):
-        return None
-
-    html = r.text or ""
-    if not html:
-        return None
-
-    if use_cache:
-        try:
-            with open(cache_path, "w", encoding="utf-8") as f:
-                f.write(html)
-        except Exception:
-            pass
-
-    time.sleep(DELAY_BETWEEN_REQUESTS)
-    return html
-
-
-def extract_links(base_url: str, html: str) -> list[str]:
-    links = set()
-    for m in re.finditer(r'href=["\'](.*?)["\']', html, flags=re.IGNORECASE):
-        href = (m.group(1) or "").strip()
-        if not href:
-            continue
-        if href.startswith("#"):
-            continue
-        if href.startswith(("mailto:", "tel:", "javascript:")):
-            continue
-        full = urljoin(base_url, href)
-        if full.startswith(("http://", "https://")):
-            links.add(full)
-    return list(links)
-
-
-def same_domain(a: str, b: str) -> bool:
-    try:
-        return urlparse(a).netloc == urlparse(b).netloc
-    except Exception:
-        return False
-
-
-# =========================
-# Sources
-# =========================
 def read_csv_urls(path: str) -> list[str]:
     if not os.path.exists(path):
         return []
-
-    candidates_cols = [
-        "fuente_url",
-        "cta_url",
-        "convocatoria_url",
-        "actividad_url_convocatoria",
-        "actividad_url",
-        "url",
-        "link",
-        "convocatoria",
-    ]
-
-    urls: list[str] = []
-
-    def _parse(delimiter=","):
-        nonlocal urls
-        with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
-            reader = csv.DictReader(f, delimiter=delimiter)
-            if not reader.fieldnames:
-                return
-            fieldnames = [c.strip() for c in reader.fieldnames]
-            cols = [c for c in candidates_cols if c in fieldnames]
-            if not cols:
-                return
-            for row in reader:
-                for c in cols:
-                    u = (row.get(c) or "").strip()
-                    if u.startswith(("http://", "https://")):
-                        urls.append(u)
-
-    _parse(",")
-    if not urls:
-        _parse(";")
-
+    urls = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            u = (row.get("fuente_url") or row.get("cta_url") or row.get("convocatoria") or "").strip()
+            if u.startswith("http"):
+                urls.append(u)
     return dedupe_urls(urls)
 
 
-def generate_sources_from_base_and_master_csv(
-    base_sources_yml: str,
-    master_csv_path: str,
-    out_generated_yml: str,
-    max_priority: int = 2000,
-):
-    base = load_yaml(base_sources_yml) or {}
-
-    seeds: list[str] = []
-    if isinstance(base, dict):
-        seeds = base.get("seeds") or []
-    elif isinstance(base, list):
-        seeds = base
-
-    seeds = [str(s).strip() for s in seeds if str(s).strip()]
-    priority_urls = read_csv_urls(master_csv_path)[:max_priority]
-
-    payload = {"seeds": seeds, "priority_urls": priority_urls}
-
-    os.makedirs(os.path.dirname(out_generated_yml), exist_ok=True)
-    with open(out_generated_yml, "w", encoding="utf-8") as f:
-        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
+# =========================
+# Domain rules (allow/deny)
+# =========================
+def load_domain_rules() -> dict:
+    y = load_yaml(DOMAIN_RULES_YML)
+    return y if isinstance(y, dict) else {}
 
 
-def select_sources_file() -> str:
-    if (not file_exists(GENERATED_SOURCES_YML)) and os.path.exists(MASTER_CSV_PATH):
-        print(f"🧩 Generando {GENERATED_SOURCES_YML} desde {MASTER_CSV_PATH} + {BASE_SOURCES_YML}")
-        generate_sources_from_base_and_master_csv(
-            base_sources_yml=BASE_SOURCES_YML,
-            master_csv_path=MASTER_CSV_PATH,
-            out_generated_yml=GENERATED_SOURCES_YML,
-            max_priority=2000,
-        )
-    return GENERATED_SOURCES_YML if file_exists(GENERATED_SOURCES_YML) else BASE_SOURCES_YML
+def url_allowed_by_rules(rules: dict, url: str, seed: str) -> bool:
+    if not rules:
+        return True
+    u = url.lower()
+
+    deny = rules.get("deny_contains", []) if isinstance(rules.get("deny_contains"), list) else []
+    for pat in deny:
+        if isinstance(pat, str) and pat.lower() in u:
+            return False
+
+    allow = rules.get("allow_contains", []) if isinstance(rules.get("allow_contains"), list) else []
+    if allow:
+        for pat in allow:
+            if isinstance(pat, str) and pat.lower() in u:
+                return True
+        # si hay allow list y no matchea nada, bloquea
+        return False
+
+    return True
 
 
-def read_sources_from_path(path: str):
-    y = load_yaml(path)
-    seeds: list[str] = []
-    priority: list[str] = []
-
-    if isinstance(y, dict):
-        seeds = y.get("seeds") or []
-        priority = y.get("priority_urls") or []
-    elif isinstance(y, list):
-        seeds = y
-
-    def dedupe(lst):
-        out, seen = [], set()
-        for s in lst:
-            s = str(s).strip()
-            if not s:
-                continue
-            if s not in seen:
-                seen.add(s)
-                out.append(s)
-        return out
-
-    return dedupe(seeds), dedupe(priority)
+# =========================
+# Keywords (base + hashtags)
+# =========================
+def read_keywords() -> list[str]:
+    y = load_yaml(KEYWORDS_YML)
+    out = []
+    if isinstance(y, list):
+        out.extend([str(x).strip() for x in y if str(x).strip()])
+    elif isinstance(y, dict):
+        for v in y.values():
+            if isinstance(v, list):
+                out.extend([str(x).strip() for x in v if str(x).strip()])
+    return [k for k in out if k]
 
 
 def read_keywords_count() -> int:
-    y = load_yaml(KEYWORDS_YML)
-    if isinstance(y, list):
-        return len([x for x in y if str(x).strip()])
-    if isinstance(y, dict):
-        total = 0
-        for v in y.values():
-            if isinstance(v, list):
-                total += len([x for x in v if str(x).strip()])
-        return total
-    return 0
+    return len(read_keywords())
+
+
+def merge_keywords_with_hashtags(keywords: list[str], hashtags: list[str]) -> list[str]:
+    # hashtags como tokens “buscables”; también agrega versiones sin '#'
+    extra = []
+    for h in hashtags or []:
+        h = (h or "").strip()
+        if not h:
+            continue
+        extra.append(h)
+        if h.startswith("#") and len(h) > 1:
+            extra.append(h[1:])
+    return dedupe_urls([k for k in (keywords + extra) if k and k.strip()])
 
 
 # =========================
@@ -368,423 +225,63 @@ def detect_city(text: str, cities: list[str]) -> str | None:
 
 
 # =========================
-# Country inference (simple)
+# Sources: merge base/generated/feminist + nested YAML support
 # =========================
-TLD_TO_COUNTRY = {
-    "fr": "France",
-    "es": "España",
-    "mx": "México",
-    "ar": "Argentina",
-    "cl": "Chile",
-    "co": "Colombia",
-    "pe": "Perú",
-    "br": "Brasil",
-    "uy": "Uruguay",
-    "bo": "Bolivia",
-    "ec": "Ecuador",
-    "cr": "Costa Rica",
-    "gt": "Guatemala",
-    "hn": "Honduras",
-    "sv": "El Salvador",
-    "ni": "Nicaragua",
-    "pa": "Panamá",
-    "do": "República Dominicana",
-    "ve": "Venezuela",
-    "it": "Italia",
-    "de": "Deutschland",
-    "uk": "United Kingdom",
-    "pt": "Portugal",
-    "cat": "Catalunya",
-}
+def generate_sources_from_base_and_master_csv(
+    base_sources_yml: str,
+    master_csv_path: str,
+    out_generated_yml: str,
+    max_priority: int = 2200,
+):
+    base_bundle = load_sources(base_sources_yml)
+    seeds = base_bundle.seeds_urls[:MAX_SEEDS]
+
+    priority_urls = read_csv_urls(master_csv_path)[:max_priority]
+    payload = {"seeds": seeds, "priority_urls": priority_urls}
+
+    os.makedirs(os.path.dirname(out_generated_yml), exist_ok=True)
+    with open(out_generated_yml, "w", encoding="utf-8") as f:
+        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
 
 
-def infer_country_from_url(url: str) -> str | None:
-    try:
-        host = urlparse(url).netloc.lower()
-        parts = host.split(".")
-        if not parts:
-            return None
-        tld = parts[-1]
-        return TLD_TO_COUNTRY.get(tld)
-    except Exception:
-        return None
-
-
-# =========================
-# FECHA: parse + heurísticas
-# =========================
-def parse_iso_date(s: str) -> date | None:
-    s = (s or "").strip()
-    if not s:
-        return None
-    try:
-        return datetime.strptime(s[:10], "%Y-%m-%d").date()
-    except Exception:
-        return None
-
-
-def extract_year_hints(url: str, title: str) -> list[int]:
-    blob = f"{url} {title}".lower()
-    years = []
-    for m in re.finditer(r"(20\d{2})", blob):
-        try:
-            y = int(m.group(1))
-            if 2015 <= y <= 2035:
-                years.append(y)
-        except Exception:
-            pass
-    # dedupe manteniendo orden
-    out = []
-    for y in years:
-        if y not in out:
-            out.append(y)
-    return out
-
-
-def apply_year_hint(ev: dict, url: str, title: str) -> dict:
-    """
-    Si el título/URL grita "2024" pero el extractor inventó 2026-02-26, corregimos el año.
-    Luego el filtro MIN_EVENT_DATE lo elimina si corresponde.
-    """
-    hints = extract_year_hints(url, title)
-    if not hints:
-        return ev
-
-    d = parse_iso_date(ev.get("fecha", ""))
-    if not d:
-        return ev
-
-    # preferimos el primer hint que aparezca (típicamente el más relevante)
-    y_hint = hints[0]
-    if d.year != y_hint:
-        try:
-            ev["fecha"] = date(y_hint, d.month, d.day).isoformat()
-        except Exception:
-            # si esa combinación no existe (29 feb), no tocamos
-            pass
-    return ev
-
-
-def passes_date_filter(ev: dict, url: str, title: str) -> bool:
-    d = parse_iso_date(ev.get("fecha", ""))
-    if not d:
-        # Si no hay fecha pero el título/URL dice 2024, lo descartamos.
-        hints = extract_year_hints(url, title)
-        if hints and hints[0] < MIN_EVENT_DATE.year:
-            return False
-        return True
-
-    # plausibilidad: evita fechas absurdas (p.ej. 5500)
-    if d.year < MIN_REASONABLE_YEAR or d.year > MAX_REASONABLE_YEAR:
-        return False
-
-    return d >= MIN_EVENT_DATE
-
-
-# =========================
-# IMAGES
-# =========================
-def is_probably_logo_url(u: str) -> bool:
-    s = (u or "").lower()
-    return any(h in s for h in BLOCKLIST_IMAGE_HINTS)
-
-
-def pick_best_image_candidate(parsed: dict) -> str:
-    if not isinstance(parsed, dict):
-        return ""
-    meta = parsed.get("meta") or {}
-    for k in ["og:image", "twitter:image", "twitter:image:src"]:
-        u = (meta.get(k) or "").strip()
-        if u and u.startswith(("http://", "https://")) and not is_probably_logo_url(u):
-            return u
-    imgs = parsed.get("images") or []
-    if isinstance(imgs, list):
-        for u in imgs:
-            u = (u or "").strip()
-            if u.startswith(("http://", "https://")) and not is_probably_logo_url(u):
-                return u
-    return ""
-
-
-def download_image(session: requests.Session, image_url: str) -> str | None:
-    if not image_url or not image_url.startswith(("http://", "https://")):
-        return None
-
-    h = sha1(image_url)
-    guessed_ext = ""
-    low = image_url.lower()
-    if low.endswith(".jpg") or low.endswith(".jpeg"):
-        guessed_ext = ".jpg"
-    elif low.endswith(".png"):
-        guessed_ext = ".png"
-
-    for ext in [".jpg", ".png"]:
-        fp = os.path.join(IMAGES_DIR, f"{h}{ext}")
-        if os.path.exists(fp) and os.path.getsize(fp) > IMAGE_MIN_BYTES:
-            return f"{h}{ext}"
-
-    try:
-        r = session.get(image_url, timeout=IMAGE_TIMEOUT, headers={"User-Agent": USER_AGENT}, stream=True)
-    except Exception:
-        return None
-
-    if r.status_code != 200:
-        return None
-
-    ct = (r.headers.get("content-type") or "").lower()
-    if "image" not in ct:
-        return None
-
-    ext = guessed_ext
-    if not ext:
-        if "jpeg" in ct or "jpg" in ct:
-            ext = ".jpg"
-        elif "png" in ct:
-            ext = ".png"
-        else:
-            return None
-
-    data = b""
-    total = 0
-    try:
-        for chunk in r.iter_content(chunk_size=16384):
-            if not chunk:
-                break
-            data += chunk
-            total += len(chunk)
-            if total > IMAGE_MAX_BYTES:
-                return None
-    except Exception:
-        return None
-
-    if total < IMAGE_MIN_BYTES:
-        return None
-
-    # anti-logo suave
-    if is_probably_logo_url(image_url) and total < 120_000:
-        return None
-
-    fn = f"{h}{ext}"
-    fp = os.path.join(IMAGES_DIR, fn)
-    try:
-        with open(fp, "wb") as f:
-            f.write(data)
-    except Exception:
-        return None
-
-    return fn
-
-
-def local_image_exists(filename: str) -> bool:
-    if not filename:
-        return False
-    fp = os.path.join(IMAGES_DIR, filename)
-    return os.path.exists(fp) and os.path.getsize(fp) > IMAGE_MIN_BYTES
-
-
-def is_direct_image_url(u: str) -> bool:
-    u = (u or "").strip().lower()
-    return u.startswith(("http://", "https://")) and u.endswith((".jpg", ".jpeg", ".png"))
-
-
-def resolve_public_image_url(ev: dict) -> str:
-    """
-    CLAVE: solo construimos URL de Pages si el archivo EXISTE localmente.
-    Así evitamos 404.
-    """
-    imagen_archivo = (ev.get("imagen_archivo") or "").strip()
-    if imagen_archivo and local_image_exists(imagen_archivo):
-        return f"{PUBLIC_BASE_URL.rstrip('/')}/images/{imagen_archivo}"
-
-    # Si no hay archivo local, NO inventamos una URL de Pages.
-    # (Podrías optar por hotlink directo a og:image, pero eso rompe menos el popup si la web cambia.)
-    return ""
-
-
-def make_umap_description_md(ev: dict) -> str:
-    colectiva = normalize(ev.get("colectiva", ""))
-    convocatoria = normalize(ev.get("convocatoria", ""))
-    sitio = (ev.get("sitio_web_colectiva") or "").strip()
-    cta = (ev.get("cta_url") or "").strip()
-
-    direccion = normalize(ev.get("direccion", "")) or normalize(ev.get("localizacion_exacta", ""))
-    fecha = normalize(ev.get("fecha", ""))
-    hora = normalize(ev.get("hora", ""))
-
-    title = colectiva or convocatoria or "Convocatoria 8M"
-
-    lines = []
-    if sitio.startswith(("http://", "https://")) and colectiva:
-        lines.append(f"## [[{sitio}|{colectiva}]]")
-    else:
-        lines.append(f"## {title}")
-
-    if direccion:
-        lines.append(direccion)
-
-    if fecha or hora:
-        if fecha and hora:
-            lines.append(f"{fecha} - {hora[:5]}")
-        else:
-            lines.append((fecha or hora)[:10])
-
-    img = resolve_public_image_url(ev)
-    if is_direct_image_url(img):
-        # ✅ uMap renderiza como imagen si va dentro de {{ }}
-        lines.append(f"{{{{{img}}}}}")
-
-    if cta.startswith(("http://", "https://")):
-        lines.append(f"[[{cta}|Accede a la convocatoria]]")
-
-    return "\n".join([l for l in lines if l]).strip()
-
-
-# =========================
-# lat/lon strict
-# =========================
-def _to_float(s: str):
-    s = (s or "").strip()
-    if not s:
-        return None
-    if "," in s and "." not in s:
-        s = s.replace(",", ".")
-    s = re.sub(r"\s+", "", s)
-    try:
-        return float(s)
-    except Exception:
-        return None
-
-
-def _valid_latlon(lat, lon) -> bool:
-    if lat is None or lon is None:
-        return False
-    return (-90.0 <= lat <= 90.0) and (-180.0 <= lon <= 180.0)
-
-
-# =========================
-# GEOCODING CACHE
-# =========================
-def load_geocode_cache(path: str) -> dict[str, tuple[str, str]]:
-    cache: dict[str, tuple[str, str]] = {}
-    if not os.path.exists(path):
-        return cache
-    try:
-        with open(path, "r", encoding="utf-8", newline="") as f:
-            r = csv.DictReader(f)
-            for row in r:
-                q = (row.get("query") or "").strip()
-                lat = (row.get("lat") or "").strip()
-                lon = (row.get("lon") or "").strip()
-                if q and lat and lon:
-                    cache[q] = (lat, lon)
-    except Exception:
-        return cache
-    return cache
-
-
-def save_geocode_cache(path: str, cache: dict[str, tuple[str, str]]):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["query", "lat", "lon"])
-        w.writeheader()
-        for q, (lat, lon) in cache.items():
-            w.writerow({"query": q, "lat": lat, "lon": lon})
-
-
-def build_geocode_query(ev: dict) -> str:
-    direccion = normalize(ev.get("direccion", "")) or normalize(ev.get("localizacion_exacta", ""))
-    ciudad = normalize(ev.get("ciudad", ""))
-    pais = normalize(ev.get("pais", ""))
-
-    parts = []
-    if direccion:
-        parts.append(direccion)
-    if ciudad and ciudad.lower() not in (direccion or "").lower():
-        parts.append(ciudad)
-    if pais:
-        parts.append(pais)
-    return ", ".join([p for p in parts if p]).strip()
-
-
-def geocode_nominatim(session: requests.Session, query: str) -> tuple[str, str] | None:
-    if not query:
-        return None
-    params = {"q": query, "format": "json", "limit": 1}
-    try:
-        r = session.get(
-            NOMINATIM_ENDPOINT,
-            params=params,
-            timeout=(7, 20),
-            headers={"User-Agent": USER_AGENT},
+def select_sources_file() -> str:
+    if (not file_exists(GENERATED_SOURCES_YML)) and os.path.exists(MASTER_CSV_PATH):
+        print(f"🧩 Generando {GENERATED_SOURCES_YML} desde {MASTER_CSV_PATH} + {BASE_SOURCES_YML}")
+        generate_sources_from_base_and_master_csv(
+            base_sources_yml=BASE_SOURCES_YML,
+            master_csv_path=MASTER_CSV_PATH,
+            out_generated_yml=GENERATED_SOURCES_YML,
+            max_priority=2200,
         )
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        if not data:
-            return None
-        lat = str(data[0].get("lat", "")).strip()
-        lon = str(data[0].get("lon", "")).strip()
-        if lat and lon:
-            return lat, lon
-    except Exception:
-        return None
-    return None
+    return GENERATED_SOURCES_YML if file_exists(GENERATED_SOURCES_YML) else BASE_SOURCES_YML
 
 
-# =========================
-# Export helpers
-# =========================
-def master_columns() -> list[str]:
-    return [
-        "colectiva",
-        "convocatoria",
-        "descripcion",
-        "fecha",
-        "hora",
-        "pais",
-        "ciudad",
-        "localizacion_exacta",
-        "direccion",
-        "lat",
-        "lon",
-        "imagen_archivo",
-        "cta_url",
-        "sitio_web_colectiva",
-        "trans_incluyente",
-        "fuente_url",
-        "fuente_tipo",
-        "confianza_extraccion",
-        "precision_ubicacion",
-        "score_relevancia",
-    ]
+def read_sources_merged() -> tuple[list[str], list[str], list[str]]:
+    """
+    Merge de:
+      - sources.yml (anidado OK)
+      - sources.generated.yml (si existe)
+      - sources.feminist.yml (si existe)
+    Devuelve: (seeds, priority_urls, hashtags)
+    """
+    seeds_all: list[str] = []
+    priority_all: list[str] = []
+    hashtags_all: list[str] = []
 
+    paths = [BASE_SOURCES_YML, select_sources_file(), FEMINIST_SOURCES_YML]
+    for p in paths:
+        if not file_exists(p):
+            continue
+        b = load_sources(p)
+        seeds_all.extend(b.seeds_urls)
+        priority_all.extend(b.priority_urls)
+        hashtags_all.extend(b.hashtags)
 
-def umap_columns() -> list[str]:
-    return [
-        "name",
-        "description",
-        "lat",
-        "lon",
-        "colectiva",
-        "convocatoria",
-        "direccion",
-        "fecha",
-        "hora",
-        "cta_url",
-        "fuente_url",
-        "score_relevancia",
-    ]
+        # opcional: si habilitan social seeds explícitamente
+        if should_include_social_seeds():
+            seeds_all.extend(b.social_urls)
 
-
-def export_csv(path: str, rows: list[dict], columns: list[str]):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
-        w.writeheader()
-        for r in rows:
-            for c in columns:
-                r.setdefault(c, "")
-            w.writerow(r)
+    return dedupe_urls(seeds_all), dedupe_urls(priority_all), dedupe_urls(hashtags_all)
 
 
 # =========================
@@ -792,40 +289,50 @@ def export_csv(path: str, rows: list[dict], columns: list[str]):
 # =========================
 def main():
     ensure_dirs()
-    session = make_session()
+    session = make_session(timeout=REQUEST_TIMEOUT)
     cities = load_cities(CITIES_TXT)
+    rules = load_domain_rules()
 
-    sources_path = select_sources_file()
-    seeds, priority = read_sources_from_path(sources_path)
-    kw_count = read_keywords_count()
+    seeds, priority, hashtags = read_sources_merged()
+    base_keywords = read_keywords()
+    keywords = merge_keywords_with_hashtags(base_keywords, hashtags)
 
-    print(f"📌 Sources: {sources_path}")
     print(f"🌐 Seeds: {min(len(seeds), MAX_SEEDS)}")
     print(f"🎯 Priority URLs: {min(len(priority), MAX_PRIORITY)}")
-    print(f"🔎 Keywords: {kw_count}")
+    print(f"🔎 Keywords: {len(keywords)} (base={len(base_keywords)} + hashtags={len(hashtags)})")
     print(f"⚡ FAST_MODE: {FAST_MODE}")
+    print(f"🧠 Score thresholds: extract>={THRESHOLD_EXTRACT} | umap>={THRESHOLD_EXPORT_UMAP}")
     print(f"🗓️  MIN_EVENT_DATE: {MIN_EVENT_DATE.isoformat()}")
-    print(f"🗺️  Geocoding: {GEOCODING_ENABLED} | max/run={GEOCODE_MAX_PER_RUN}")
-    print(f"🖼️  Images: {IMAGES_ENABLED} | max/run={MAX_IMAGES_PER_RUN}")
+    if not should_include_social_seeds():
+        print("🧷 Social seeds: OFF (ENABLE_SOCIAL_SEEDS=false)")
 
     candidates: list[str] = []
     seen = set()
 
+    # priority primero
     for u in priority[:MAX_PRIORITY]:
-        if u not in seen:
+        if u not in seen and url_allowed_by_rules(rules, u, ""):
             seen.add(u)
             candidates.append(u)
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
 
+    # crawl por seeds (misma domain)
     for seed in seeds[:MAX_SEEDS]:
         if len(candidates) >= MAX_TOTAL_CANDIDATES:
             break
+
+        if not url_allowed_by_rules(rules, seed, ""):
+            continue
+
         html = fetch_url(session, seed, use_cache=True)
         if not html:
+            print(f"[WARN] Seed sin respuesta: {seed}")
             continue
+
         links = extract_links(seed, html)
         picked = 0
+
         for link in links:
             if len(candidates) >= MAX_TOTAL_CANDIDATES:
                 break
@@ -833,13 +340,16 @@ def main():
                 continue
             if not same_domain(seed, link):
                 continue
+            if not url_allowed_by_rules(rules, link, ""):
+                continue
             seen.add(link)
             candidates.append(link)
             picked += 1
             if picked >= MAX_PAGES_PER_SEED:
                 break
+
         if picked:
-            print(f"🔗 {seed} -> candidatos (seed crawl): {picked}")
+            print(f"🔗 {seed} -> candidatos: {picked}")
 
     print(f"🔎 Candidates total: {len(candidates)}")
 
@@ -847,138 +357,123 @@ def main():
     started = time.time()
 
     geocode_cache = load_geocode_cache(GEOCODE_CACHE_PATH)
-    geocoded_now = 0
-    images_downloaded = 0
-    filtered_old = 0
 
+    # contadores
+    n_events = 0
+    n_geocoded = 0
+    n_imgs = 0
+    n_old_skip = 0
+    n_low_score = 0
+    n_rules_skip = 0
+
+    # procesar
     for i, url in enumerate(candidates, start=1):
-        t0 = time.time()
-
-        if i % 100 == 0:
-            elapsed = time.time() - started
-            print(
-                f"⏳ {i}/{len(candidates)} | eventos:{len(records)} | geocoded:{geocoded_now} | "
-                f"imgs:{images_downloaded} | old_skip:{filtered_old} | {elapsed:.1f}s"
-            )
+        if SLEEP_EVERY and (i % SLEEP_EVERY == 0):
+            time.sleep(1)
 
         html = fetch_url(session, url, use_cache=True)
-        if html is None:
-            continue
-        if (time.time() - t0) > MAX_SECONDS_PER_URL:
+        if not html:
             continue
 
         parsed = parse_page(url, html)
-        text_blob = normalize(parsed.get("text", "")) if isinstance(parsed, dict) else ""
-        title = normalize(parsed.get("title", "")) if isinstance(parsed, dict) else ""
+        if not parsed:
+            continue
 
-        try:
-            ev = extract_event_fields(parsed)
-        except Exception:
-            ev = None
-
+        # extracción
+        ev = extract_event_fields(parsed)
         if not ev:
             continue
 
-        # corrigir año si hay hint fuerte (2024 en título/URL)
-        ev = apply_year_hint(ev, url, title)
+        # scoring básico: usamos el score que ya produce extractor_ai (si existe),
+        # y además reforzamos con keywords/hashtags.
+        score = int(ev.get("score_relevancia") or 0)
 
-        # filtro de fechas (mejorado)
-        if not passes_date_filter(ev, url, title):
-            filtered_old += 1
+        text_blob = " ".join([
+            str(ev.get("colectiva") or ""),
+            str(ev.get("convocatoria") or ""),
+            str(ev.get("descripcion") or ""),
+            str(ev.get("direccion") or ""),
+            str(parsed.get("title") or ""),
+            str(parsed.get("text") or ""),
+        ]).lower()
+
+        # bonus por keywords (incluye hashtags)
+        bonus = 0
+        for k in keywords:
+            kk = k.lower()
+            if kk and kk in text_blob:
+                bonus += 1
+        score += min(8, bonus)  # cap
+
+        ev["score_relevancia"] = score
+        ev["fuente_url"] = ev.get("fuente_url") or url
+        ev["cta_url"] = (ev.get("cta_url") or ev.get("convocatoria") or url).split("#")[0]  # evita links vacíos por fragments
+
+        # fecha mínima
+        f = ev.get("fecha") or ""
+        try:
+            if f:
+                d = date.fromisoformat(f)
+                if d < MIN_EVENT_DATE:
+                    n_old_skip += 1
+                    continue
+        except Exception:
+            pass
+
+        # reglas / thresholds
+        if score < THRESHOLD_EXTRACT:
+            n_low_score += 1
+            continue
+        if not url_allowed_by_rules(rules, url, ""):
+            n_rules_skip += 1
             continue
 
-        ev.setdefault("pais", "")
-        ev.setdefault("ciudad", "")
-        ev.setdefault("direccion", "")
-        ev.setdefault("localizacion_exacta", "")
-        ev.setdefault("lat", "")
-        ev.setdefault("lon", "")
-        ev.setdefault("sitio_web_colectiva", "")
-        ev.setdefault("imagen_archivo", "")
-
-        ev["fuente_url"] = url
-        ev["fuente_tipo"] = "web"
-        ev["confianza_extraccion"] = ev.get("confianza_extraccion") or "media"
-
-        if not normalize(ev.get("ciudad", "")):
-            c = detect_city(" ".join([title, text_blob]), cities)
+        # ciudad
+        if not ev.get("ciudad"):
+            c = detect_city(text_blob, cities)
             if c:
                 ev["ciudad"] = c
 
-        if not normalize(ev.get("pais", "")):
-            p = infer_country_from_url(url)
-            if p:
-                ev["pais"] = p
+        # geocode
+        geo = geocode_event(ev, geocode_cache=geocode_cache)
+        if geo and geo.get("lat") and geo.get("lon"):
+            ev["lat"] = geo["lat"]
+            ev["lon"] = geo["lon"]
+            n_geocoded += 1
 
-        if not normalize(ev.get("localizacion_exacta", "")) and normalize(ev.get("ciudad", "")):
-            ev["localizacion_exacta"] = ev["ciudad"]
-
-        if GEOCODING_ENABLED and geocoded_now < GEOCODE_MAX_PER_RUN:
-            lat0 = _to_float(str(ev.get("lat", "")))
-            lon0 = _to_float(str(ev.get("lon", "")))
-            if not _valid_latlon(lat0, lon0):
-                q = build_geocode_query(ev)
-                if q:
-                    if q in geocode_cache:
-                        ev["lat"], ev["lon"] = geocode_cache[q]
-                    else:
-                        res = geocode_nominatim(session, q)
-                        if res:
-                            lat_s, lon_s = res
-                            lat1 = _to_float(lat_s)
-                            lon1 = _to_float(lon_s)
-                            if _valid_latlon(lat1, lon1):
-                                ev["lat"] = lat_s
-                                ev["lon"] = lon_s
-                                geocode_cache[q] = (lat_s, lon_s)
-                                geocoded_now += 1
-                        time.sleep(GEOCODE_DELAY_SECONDS)
-
-        # Descargar imagen solo si vale la pena
-        if IMAGES_ENABLED and images_downloaded < MAX_IMAGES_PER_RUN:
-            candidate = pick_best_image_candidate(parsed)
-            if candidate and candidate.startswith(("http://", "https://")):
-                fn = download_image(session, candidate)
-                if fn:
-                    ev["imagen_archivo"] = fn
-                    images_downloaded += 1
+        # imagen (solo si hay url candidata)
+        img_url = ev.get("imagen") or ev.get("actividad_url_imagen") or ""
+        if img_url and isinstance(img_url, str) and img_url.startswith("http"):
+            out = download_and_process_image(img_url, out_dir=IMAGES_DIR)
+            if out and out.get("public_url"):
+                ev["imagen"] = out["public_url"]  # debe ser URL publicada en Pages
+                n_imgs += 1
 
         records.append(ev)
+        n_events += 1
 
-    if GEOCODING_ENABLED:
-        save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
+        if i % 100 == 0 or i == len(candidates):
+            elapsed = time.time() - started
+            print(f"⏳ {i}/{len(candidates)} | eventos:{n_events} | geocoded:{n_geocoded} | imgs:{n_imgs} | old_skip:{n_old_skip} | low_score:{n_low_score} | {elapsed:.1f}s")
 
-    export_csv(EXPORT_MASTER, records, master_columns())
+    save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
 
-    umap_rows = []
-    sin_coord_rows = []
+    # export
+    export_master_csv(EXPORT_MASTER, records)
+    export_umap_csv(EXPORT_UMAP, records, min_score=THRESHOLD_EXPORT_UMAP)
+    export_sin_coord_csv(EXPORT_SIN_COORD, records, min_score=THRESHOLD_EXPORT_UMAP)
 
-    for r in records:
-        lat = _to_float(str(r.get("lat", "")))
-        lon = _to_float(str(r.get("lon", "")))
-
-        if _valid_latlon(lat, lon):
-            r2 = dict(r)
-            r2["lat"] = f"{lat:.6f}"
-            r2["lon"] = f"{lon:.6f}"
-            r2["name"] = normalize(r2.get("colectiva", "")) or normalize(r2.get("convocatoria", "")) or "Convocatoria 8M"
-            r2["description"] = make_umap_description_md(r2)
-            umap_rows.append(r2)
-        else:
-            sin_coord_rows.append(dict(r))
-
-    export_csv(EXPORT_UMAP, umap_rows, umap_columns())
-    export_csv(EXPORT_SIN_COORD, sin_coord_rows, master_columns())
-
-    elapsed_total = time.time() - started
-    print(f"\n📄 CSV master:    {EXPORT_MASTER}")
+    total_time = time.time() - started
+    print("")
+    print(f"📄 CSV master:    {EXPORT_MASTER}")
     print(f"📄 CSV uMap:      {EXPORT_UMAP}")
     print(f"📄 CSV sin coord: {EXPORT_SIN_COORD}")
     print(f"🧾 Eventos master:        {len(records)}")
-    print(f"🧾 Eventos uMap (coords): {len(umap_rows)}")
-    print(f"🗑️  Filtrados por fecha:  {filtered_old}")
-    print(f"🖼️ imágenes descargadas:  {images_downloaded}")
-    print(f"⏱️  Tiempo total: {elapsed_total:.1f}s")
+    print(f"🗑️  Filtrados por fecha:  {n_old_skip}")
+    print(f"🧠 Skipped low score:     {n_low_score}")
+    print(f"🧱 Skipped by rules:      {n_rules_skip}")
+    print(f"🖼️ imágenes descargadas:  {n_imgs}")
+    print(f"⏱️  Tiempo total: {total_time:.1f}s")
 
 
 if __name__ == "__main__":

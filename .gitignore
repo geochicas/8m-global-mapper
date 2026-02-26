@@ -221,3 +221,5 @@ data/images/*
 # macOS
 .DS_Store
 config/sources.generated.yml
+data/cache/
+main_backup_*.py

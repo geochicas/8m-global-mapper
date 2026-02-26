@@ -1,0 +1,58 @@
+global:
+  deny_url_contains:
+    - "wikipedia.org"
+    - "/w/index.php"
+    - "mobileaction=toggle_view_mobile"
+
+    - "/privacy"
+    - "/terms"
+    - "/cookies"
+    - "/cookie"
+    - "/legal"
+    - "/about"
+    - "/contact"
+    - "/sitemap"
+    - "/tag/"
+    - "/category/"
+    - "/author/"
+    - "/page/"
+    - "/feed"
+    - "/rss"
+
+    # WordPress/otros: comentarios, búsquedas, shares
+    - "#respond"
+    - "?s="
+    - "&s="
+    - "?replytocom="
+    - "&replytocom="
+    - "?share="
+    - "&share="
+
+  deny_title_contains:
+    - "privacy policy"
+    - "cookie policy"
+    - "terms of service"
+    - "subscribe"
+    - "newsletter"
+    - "wikipedia"
+
+domains:
+  amnesty.ca:
+    deny_url_contains:
+      - "/human-rights-news/international-womens-day"
+    allow_url_contains:
+      - "/event"
+      - "/events"
+      - "/take-action"
+      - "/action"
+      - "/petition"
+      - "/news"
+
+  women-co.com:
+    hard_deny: true
+
+  es.wikipedia.org:
+    hard_deny: true
+
+  wikipedia.org:
+    hard_deny: true
