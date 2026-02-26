@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sqlite3
@@ -29,7 +30,7 @@ class Geocoder:
     def __init__(
         self,
         db_path: str = DEFAULT_DB_PATH,
-        user_agent: str = "geochicas-8m-global-mapper/1.0 (contact: geochicas)",
+        user_agent: str = "geochicas-8m-global-mapper/1.0 (+https://github.com/geochicas/8m-global-mapper)",
         min_delay_seconds: float = 1.1,
         timeout_seconds: int = 20,
     ):
@@ -164,3 +165,108 @@ class Geocoder:
         res = GeocodeResult(lat=lat, lon=lon, display_name=display, confidence=confidence, precision=precision)
         self._set_cache(q_norm, res)
         return res
+
+
+# ======================================================
+# COMPAT: main.py espera estas funciones (API vieja)
+# ======================================================
+
+_GEO_SINGLETON: Optional[Geocoder] = None
+
+
+def _get_geocoder() -> Geocoder:
+    global _GEO_SINGLETON
+    if _GEO_SINGLETON is None:
+        _GEO_SINGLETON = Geocoder(
+            db_path=os.environ.get("GEOCODE_DB_PATH", DEFAULT_DB_PATH),
+            user_agent=os.environ.get(
+                "USER_AGENT",
+                "geochicas-8m-global-mapper/1.0 (+https://github.com/geochicas/8m-global-mapper)",
+            ),
+            min_delay_seconds=float(os.environ.get("NOMINATIM_MIN_DELAY", "1.1")),
+            timeout_seconds=int(os.environ.get("NOMINATIM_TIMEOUT", "20")),
+        )
+    return _GEO_SINGLETON
+
+
+def load_geocode_cache(path: str) -> dict:
+    """
+    Cache JSON “legacy” para compat con main.py.
+    Ojo: la clase Geocoder ya cachea en SQLite; este JSON es un plus.
+    """
+    try:
+        if path and os.path.exists(path) and os.path.getsize(path) > 0:
+            with open(path, "r", encoding="utf-8") as f:
+                y = json.load(f)
+            return y if isinstance(y, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def save_geocode_cache(path: str, geocode_cache: dict):
+    """
+    Guarda el cache JSON “legacy”.
+    """
+    try:
+        if not path:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(geocode_cache if isinstance(geocode_cache, dict) else {}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _build_query(ev: dict) -> str:
+    """
+    Construye un query razonable desde los campos del evento.
+    Prioriza dirección/localización exacta > ciudad > país.
+    """
+    parts = []
+    for k in ["localizacion_exacta", "direccion", "ciudad", "pais"]:
+        v = (ev.get(k) or "").strip()
+        if v:
+            parts.append(v)
+    # fallback suave
+    if not parts:
+        v = (ev.get("convocatoria") or "").strip()
+        if v:
+            parts.append(v)
+    return ", ".join(parts).strip()
+
+
+def geocode_event(ev: dict, geocode_cache: Optional[dict] = None) -> Optional[dict]:
+    """
+    Compat: devuelve dict con lat/lon/precision/confidence/display_name
+    """
+    if not isinstance(ev, dict):
+        return None
+
+    q = _build_query(ev)
+    if not q:
+        return None
+
+    cache = geocode_cache if isinstance(geocode_cache, dict) else {}
+    q_norm = re.sub(r"\s+", " ", q).strip().lower()
+
+    if q_norm in cache and isinstance(cache[q_norm], dict):
+        return cache[q_norm]
+
+    g = _get_geocoder()
+    res = g.geocode(q)
+    if not res:
+        return None
+
+    out = {
+        "lat": res.lat,
+        "lon": res.lon,
+        "display_name": res.display_name,
+        "confidence": res.confidence,
+        "precision": res.precision,
+    }
+
+    if isinstance(cache, dict):
+        cache[q_norm] = out
+
+    return out
