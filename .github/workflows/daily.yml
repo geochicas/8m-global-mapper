@@ -1,10 +1,12 @@
 name: 8M Global Scraper Daily
 
 on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
     - cron: "0 6 * * *"
-  workflow_dispatch:
-    - main
 
 permissions:
   contents: read
