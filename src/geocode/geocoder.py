@@ -1,10 +1,12 @@
-import json
+# src/geocode/geocoder.py
+from __future__ import annotations
+
 import os
 import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import requests
 
@@ -17,20 +19,16 @@ class GeocodeResult:
     lat: str
     lon: str
     display_name: str
-    confidence: str  # "alta" | "media" | "baja"
-    precision: str   # "exacta" | "ciudad" | "pais" | ""
+    confidence: str
+    precision: str
 
 
 class Geocoder:
-    """
-    Geocoder con cache SQLite + rate limit.
-    Usa Nominatim (OpenStreetMap) con un User-Agent identificable.
-    """
 
     def __init__(
         self,
         db_path: str = DEFAULT_DB_PATH,
-        user_agent: str = "geochicas-8m-global-mapper/1.0 (+https://github.com/geochicas/8m-global-mapper)",
+        user_agent: str = "geochicas-8m-global-mapper/1.0",
         min_delay_seconds: float = 1.1,
         timeout_seconds: int = 20,
     ):
@@ -44,12 +42,6 @@ class Geocoder:
         self.conn = sqlite3.connect(db_path)
         self._init_db()
 
-    def close(self):
-        try:
-            self.conn.close()
-        except Exception:
-            pass
-
     def _init_db(self):
         cur = self.conn.cursor()
         cur.execute(
@@ -60,18 +52,14 @@ class Geocoder:
                 lon TEXT,
                 display_name TEXT,
                 confidence TEXT,
-                precision TEXT,
-                ts INTEGER
+                precision TEXT
             )
             """
         )
         self.conn.commit()
 
-    @staticmethod
-    def _norm_query(q: str) -> str:
-        q = (q or "").strip()
-        q = re.sub(r"\s+", " ", q)
-        return q.lower()
+    def _norm_query(self, q: str) -> str:
+        return re.sub(r"\s+", " ", (q or "").strip()).lower()
 
     def _get_cached(self, q_norm: str) -> Optional[GeocodeResult]:
         cur = self.conn.cursor()
@@ -88,8 +76,8 @@ class Geocoder:
         cur = self.conn.cursor()
         cur.execute(
             """
-            INSERT OR REPLACE INTO geocode_cache(query, lat, lon, display_name, confidence, precision, ts)
-            VALUES(?,?,?,?,?,?, strftime('%s','now'))
+            INSERT OR REPLACE INTO geocode_cache(query, lat, lon, display_name, confidence, precision)
+            VALUES(?,?,?,?,?,?)
             """,
             (q_norm, res.lat, res.lon, res.display_name, res.confidence, res.precision),
         )
@@ -102,11 +90,7 @@ class Geocoder:
             time.sleep(self.min_delay_seconds - elapsed)
         self._last_call_ts = time.time()
 
-    def geocode(self, query: str, country_code: str = "") -> Optional[GeocodeResult]:
-        """
-        query: texto tipo "San José, Costa Rica" o "Plaza de Mayo, Buenos Aires"
-        country_code: opcional (ISO2) para acotar (ej. "cr", "ar")
-        """
+    def geocode(self, query: str) -> Optional[GeocodeResult]:
         q_norm = self._norm_query(query)
         if not q_norm:
             return None
@@ -117,18 +101,10 @@ class Geocoder:
 
         self._rate_limit()
 
-        params = {
-            "q": query,
-            "format": "jsonv2",
-            "limit": 1,
-        }
-        if country_code:
-            params["countrycodes"] = country_code.lower()
-
         try:
             r = requests.get(
                 NOMINATIM_URL,
-                params=params,
+                params={"q": query, "format": "jsonv2", "limit": 1},
                 timeout=self.timeout_seconds,
                 headers={"User-Agent": self.user_agent},
             )
@@ -141,132 +117,67 @@ class Geocoder:
             return None
 
         hit = data[0]
-        lat = str(hit.get("lat", "")).strip()
-        lon = str(hit.get("lon", "")).strip()
-        display = str(hit.get("display_name", "")).strip()
+        res = GeocodeResult(
+            lat=str(hit.get("lat", "")),
+            lon=str(hit.get("lon", "")),
+            display_name=str(hit.get("display_name", "")),
+            confidence="media",
+            precision="exacta",
+        )
 
-        # heurística simple de precisión
-        typ = (hit.get("type") or "").lower()
-        cls = (hit.get("class") or "").lower()
-
-        precision = ""
-        confidence = "baja"
-
-        if cls == "place" and typ in ("city", "town", "village"):
-            precision = "ciudad"
-            confidence = "media"
-        elif cls == "boundary" and typ in ("administrative",):
-            precision = "pais"
-            confidence = "baja"
-        else:
-            precision = "exacta"
-            confidence = "media"
-
-        res = GeocodeResult(lat=lat, lon=lon, display_name=display, confidence=confidence, precision=precision)
         self._set_cache(q_norm, res)
         return res
 
 
-# ======================================================
-# COMPAT: main.py espera estas funciones (API vieja)
-# ======================================================
+# =========================
+# Compat layer para main.py
+# =========================
 
-_GEO_SINGLETON: Optional[Geocoder] = None
+_GEOCODER: Optional[Geocoder] = None
 
 
 def _get_geocoder() -> Geocoder:
-    global _GEO_SINGLETON
-    if _GEO_SINGLETON is None:
-        _GEO_SINGLETON = Geocoder(
-            db_path=os.environ.get("GEOCODE_DB_PATH", DEFAULT_DB_PATH),
-            user_agent=os.environ.get(
-                "USER_AGENT",
-                "geochicas-8m-global-mapper/1.0 (+https://github.com/geochicas/8m-global-mapper)",
-            ),
-            min_delay_seconds=float(os.environ.get("NOMINATIM_MIN_DELAY", "1.1")),
-            timeout_seconds=int(os.environ.get("NOMINATIM_TIMEOUT", "20")),
-        )
-    return _GEO_SINGLETON
+    global _GEOCODER
+    if _GEOCODER is None:
+        _GEOCODER = Geocoder()
+    return _GEOCODER
 
 
-def load_geocode_cache(path: str) -> dict:
-    """
-    Cache JSON “legacy” para compat con main.py.
-    Ojo: la clase Geocoder ya cachea en SQLite; este JSON es un plus.
-    """
-    try:
-        if path and os.path.exists(path) and os.path.getsize(path) > 0:
-            with open(path, "r", encoding="utf-8") as f:
-                y = json.load(f)
-            return y if isinstance(y, dict) else {}
-    except Exception:
-        pass
+def load_geocode_cache(path: str) -> Dict[str, Any]:
     return {}
 
 
-def save_geocode_cache(path: str, geocode_cache: dict):
-    """
-    Guarda el cache JSON “legacy”.
-    """
-    try:
-        if not path:
-            return
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(geocode_cache if isinstance(geocode_cache, dict) else {}, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+def save_geocode_cache(path: str, cache: Dict[str, Any]) -> None:
+    return None
 
 
-def _build_query(ev: dict) -> str:
-    """
-    Construye un query razonable desde los campos del evento.
-    Prioriza dirección/localización exacta > ciudad > país.
-    """
-    parts = []
-    for k in ["localizacion_exacta", "direccion", "ciudad", "pais"]:
-        v = (ev.get(k) or "").strip()
-        if v:
-            parts.append(v)
-    # fallback suave
-    if not parts:
-        v = (ev.get("convocatoria") or "").strip()
-        if v:
-            parts.append(v)
-    return ", ".join(parts).strip()
+def geocode_event(ev: Dict[str, Any], geocode_cache=None) -> Optional[Dict[str, str]]:
+    if ev.get("lat") and ev.get("lon"):
+        return {
+            "lat": ev["lat"],
+            "lon": ev["lon"],
+            "display_name": "",
+            "confidence": "alta",
+            "precision": ev.get("precision_ubicacion", ""),
+        }
 
+    ciudad = (ev.get("ciudad") or "").strip()
+    pais = (ev.get("pais") or "").strip()
 
-def geocode_event(ev: dict, geocode_cache: Optional[dict] = None) -> Optional[dict]:
-    """
-    Compat: devuelve dict con lat/lon/precision/confidence/display_name
-    """
-    if not isinstance(ev, dict):
+    if not ciudad and not pais:
         return None
 
-    q = _build_query(ev)
-    if not q:
-        return None
-
-    cache = geocode_cache if isinstance(geocode_cache, dict) else {}
-    q_norm = re.sub(r"\s+", " ", q).strip().lower()
-
-    if q_norm in cache and isinstance(cache[q_norm], dict):
-        return cache[q_norm]
+    query = ", ".join([x for x in [ciudad, pais] if x])
 
     g = _get_geocoder()
-    res = g.geocode(q)
+    res = g.geocode(query)
     if not res:
         return None
 
-    out = {
+    return {
         "lat": res.lat,
         "lon": res.lon,
         "display_name": res.display_name,
         "confidence": res.confidence,
         "precision": res.precision,
     }
-
-    if isinstance(cache, dict):
-        cache[q_norm] = out
-
-    return out
