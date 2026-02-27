@@ -1,203 +1,111 @@
+# src/media/image_processor.py
+# Descarga y guarda imágenes localmente.
+# Wrapper compat: download_and_process_image(url, out_dir=...) -> {"public_url": "...", "local_path": "..."}
+#
+# Nota: en GitHub Pages, "public_url" idealmente debería mapear al path publicado.
+# Aquí dejamos "public_url" como ruta relativa estándar para que tu pipeline
+# la pueda reescribir si ya tienes esa lógica en Actions/Pages.
+
+from __future__ import annotations
+
 import os
 import re
 import hashlib
-from io import BytesIO
+from urllib.parse import urlparse
 
 import requests
-from PIL import Image
 
 
-BLOCKLIST_HINTS = [
-    "logo", "icon", "sprite", "favicon", "apple-touch-icon", "site-icon",
-    "header", "footer", "navbar", "menu", "brand", "badge", "avatar"
-]
+def _safe_filename_from_url(url: str) -> str:
+    u = (url or "").strip()
+    if not u:
+        return "image"
 
-def sha1(s: str) -> str:
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+    parsed = urlparse(u)
+    name = os.path.basename(parsed.path) or "image"
 
-def is_probably_ui_asset(url: str) -> bool:
-    s = (url or "").lower()
-    return any(h in s for h in BLOCKLIST_HINTS)
+    # limpia query strings “pegadas” (por si acaso)
+    name = name.split("?")[0].split("#")[0].strip() or "image"
 
-def _safe_ext_from_content_type(ct: str) -> str | None:
-    ct = (ct or "").lower()
-    if "jpeg" in ct or "jpg" in ct:
-        return ".jpg"
-    if "png" in ct:
-        return ".png"
-    if "webp" in ct:
-        return ".webp"
-    return None
+    # extensión
+    if not re.search(r"\.(jpg|jpeg|png|webp|gif)$", name, flags=re.IGNORECASE):
+        name += ".jpg"
 
-def _safe_ext_from_url(url: str) -> str | None:
-    u = (url or "").lower()
-    if u.endswith(".jpg") or u.endswith(".jpeg"):
-        return ".jpg"
-    if u.endswith(".png"):
-        return ".png"
-    if u.endswith(".webp"):
-        return ".webp"
-    return None
+    # evita cosas raras
+    name = re.sub(r"[^a-zA-Z0-9._-]+", "_", name)
+    return name
 
-def download_image_filtered(
-    session: requests.Session,
-    image_url: str,
-    out_dir: str,
-    user_agent: str,
-    timeout=(7, 25),
-    min_bytes=40_000,
-    max_bytes=6_000_000,
-    min_width=500,
-    min_height=350,
-    max_banner_ratio=3.0,
-    min_ratio=0.45,
-    max_ratio=2.4,
-) -> str | None:
-    """
-    Descarga imagen y filtra banners/headers/logos usando:
-    - tamaño (bytes)
-    - dimensiones (min_width/min_height)
-    - proporción (ratio ancho/alto)
-    Devuelve filename (hash.ext) o None.
-    """
-    if not image_url or not image_url.startswith(("http://", "https://")):
+
+def _hash(url: str) -> str:
+    return hashlib.sha1((url or "").encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _download_bytes(url: str, timeout: int = 25) -> bytes | None:
+    headers = {
+        "User-Agent": os.environ.get(
+            "USER_AGENT",
+            "geochicas-8m-global-mapper/1.0 (+https://github.com/geochicas/8m-global-mapper)",
+        )
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=timeout, stream=True)
+        r.raise_for_status()
+        return r.content
+    except Exception:
         return None
 
-    # Evitar assets UI desde URL (logo/header/footer)
-    if is_probably_ui_asset(image_url):
-        # ojo: a veces el poster tiene "header", pero en general esto reduce mucho basura
+
+def download_and_process_image(url: str, out_dir: str = "data/images") -> dict | None:
+    """
+    Compat con main.py.
+    - descarga
+    - guarda en out_dir
+    - retorna dict con public_url y local_path
+
+    No hace “procesado” pesado para no romper deps en Actions.
+    """
+    url = (url or "").strip()
+    if not url.startswith("http"):
         return None
 
     os.makedirs(out_dir, exist_ok=True)
 
-    h = sha1(image_url)
+    # nombre estable por hash para evitar duplicados
+    base_name = _safe_filename_from_url(url)
+    stem, ext = os.path.splitext(base_name)
+    fname = f"{stem}_{_hash(url)}{ext}"
+    local_path = os.path.join(out_dir, fname)
 
-    # cache local si existe
-    for ext in [".jpg", ".png", ".webp"]:
-        fp = os.path.join(out_dir, f"{h}{ext}")
-        if os.path.exists(fp) and os.path.getsize(fp) >= min_bytes:
-            return f"{h}{ext}"
+    # si ya existe, devolvemos
+    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        return {
+            "public_url": _public_url_for_local_path(local_path),
+            "local_path": local_path,
+            "source_url": url,
+        }
+
+    b = _download_bytes(url)
+    if not b:
+        return None
 
     try:
-        r = session.get(
-            image_url,
-            timeout=timeout,
-            headers={"User-Agent": user_agent},
-            stream=True,
-            allow_redirects=True,
-        )
+        with open(local_path, "wb") as f:
+            f.write(b)
     except Exception:
         return None
 
-    if r.status_code != 200:
-        return None
+    return {
+        "public_url": _public_url_for_local_path(local_path),
+        "local_path": local_path,
+        "source_url": url,
+    }
 
-    ct = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
-    if "image" not in ct:
-        return None
 
-    ext = _safe_ext_from_url(image_url) or _safe_ext_from_content_type(ct)
-    if ext not in [".jpg", ".png", ".webp"]:
-        return None
-
-    data = b""
-    total = 0
-    try:
-        for chunk in r.iter_content(chunk_size=16384):
-            if not chunk:
-                break
-            data += chunk
-            total += len(chunk)
-            if total > max_bytes:
-                return None
-    except Exception:
-        return None
-
-    if total < min_bytes:
-        return None
-
-    # Validar con Pillow: dimensiones + ratio
-    try:
-        im = Image.open(BytesIO(data))
-        im.load()
-        w, h_px = im.size
-    except Exception:
-        return None
-
-    # Tamaño mínimo en pixels (mata logos/cosas chicas)
-    if w < min_width or h_px < min_height:
-        return None
-
-    ratio = (w / max(h_px, 1))
-    # Muy horizontal => header/banner
-    if ratio > max_banner_ratio:
-        return None
-    # Muy estrecha => iconos verticales raros
-    if ratio < min_ratio:
-        return None
-    # Tope de “no poster”
-    if ratio > max_ratio:
-        return None
-
-    filename = f"{sha1(image_url)}{ext}"
-    fp = os.path.join(out_dir, filename)
-    try:
-        with open(fp, "wb") as f:
-            f.write(data)
-    except Exception:
-        return None
-
-    return filename
-# ======================================================
-# COMPAT: main.py espera download_and_process_image(...)
-# ======================================================
-
-def download_and_process_image(img_url: str, out_dir: str = "data/images"):
+def _public_url_for_local_path(local_path: str) -> str:
     """
-    Wrapper de compatibilidad para Actions/main.py.
-    Intenta usar la función 'real' existente en este módulo.
-    Debe devolver dict con al menos: {"public_url": "..."} cuando funcione.
+    Si estás publicando data/images en Pages, esto puede funcionar como ruta relativa.
+    Ajusta aquí si tu Pages publica en otra carpeta.
     """
-    if not img_url:
-        return None
-
-    # 1) Si ya existe alguna función “principal” en este módulo, úsala.
-    #    (Mantiene el comportamiento anterior sin reescribir pipeline.)
-    for fn_name in [
-        "download_and_process",            # nombre típico
-        "process_and_publish_image",       # nombre típico
-        "download_process_image",          # nombre típico
-        "process_image",                   # genérico
-    ]:
-        fn = globals().get(fn_name)
-        if callable(fn):
-            try:
-                # probamos firmas comunes
-                try:
-                    return fn(img_url, out_dir=out_dir)
-                except TypeError:
-                    return fn(img_url, out_dir)
-            except Exception:
-                return None
-
-    # 2) Fallback ultra simple: descargar sin “procesado”.
-    #    Esto evita que el job muera; si no hay public_url, simplemente no setea imagen en main.
-    try:
-        import os
-        import hashlib
-        import requests
-
-        os.makedirs(out_dir, exist_ok=True)
-        ext = ".jpg"
-        h = hashlib.sha1(img_url.encode("utf-8")).hexdigest()[:16]
-        path = os.path.join(out_dir, f"{h}{ext}")
-
-        r = requests.get(img_url, timeout=20, headers={"User-Agent": os.environ.get("USER_AGENT", "geochicas-8m-global-mapper/1.0")})
-        r.raise_for_status()
-        with open(path, "wb") as f:
-            f.write(r.content)
-
-        # sin saber tu lógica de GitHub Pages aquí, devolvemos solo local_path
-        return {"local_path": path}
-    except Exception:
-        return None
+    # normaliza a ruta relativa tipo data/images/xxx.jpg
+    lp = local_path.replace("\\", "/")
+    return lp
