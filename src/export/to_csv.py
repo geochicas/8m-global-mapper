@@ -156,4 +156,6 @@ def export_sin_coord_csv(path: str, rows: List[dict], min_score: int = 10) -> st
         if r.get("lat") and r.get("lon"):
             continue
         filtered.append(r)
-    return export_csv(path, filtered, SIN_COORD_COLUMNS)# (PEGA AQUÍ TODO EL ARCHIVO TAL CUAL, desde la primera línea hasta la última)
+    return export_csv(path, filtered, SIN_COORD_COLUMNS)
+
+

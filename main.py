@@ -13,16 +13,17 @@
 # - sources.yml puede ser ANIDADO (región/tema/urls/social/hashtags)
 # - hashtags se incorporan como keywords extra (para scoring/matching)
 # - social no se scrapea por defecto (ENABLE_SOCIAL_SEEDS=false)
+#
+# Guardrail agregado (Paso 7):
+# - filtra falsos positivos obvios de "1 de mayo" cuando NO hay ancla 8M/IWD
 
 from __future__ import annotations
 
 import csv
 import os
 import re
-import sys
 import time
-import hashlib
-from datetime import date, datetime
+from datetime import date
 
 import yaml
 
@@ -177,10 +178,6 @@ def read_keywords() -> list[str]:
             if isinstance(v, list):
                 out.extend([str(x).strip() for x in v if str(x).strip()])
     return [k for k in out if k]
-
-
-def read_keywords_count() -> int:
-    return len(read_keywords())
 
 
 def merge_keywords_with_hashtags(keywords: list[str], hashtags: list[str]) -> list[str]:
@@ -397,10 +394,32 @@ def main():
             str(parsed.get("text") or ""),
         ]).lower()
 
+        # --- Guardrail Paso 7: anti "1 de mayo" cuando no hay ancla 8M/IWD ---
+        is_may_day = any(x in text_blob for x in ["1 de mayo", "1 mayo", "may day", "first of may"])
+        has_8m = any(
+            x in text_blob
+            for x in [
+                "8m",
+                "8 de marzo",
+                "8 marzo",
+                "8 mars",
+                "8 march",
+                "iwd",
+                "international women's day",
+                "international womens day",
+                "día internacional de la mujer",
+                "dia internacional de la mujer",
+                "dia internacional da mulher",
+            ]
+        )
+        if is_may_day and not has_8m:
+            n_low_score += 1
+            continue
+
         # bonus por keywords (incluye hashtags)
         bonus = 0
         for k in keywords:
-            kk = k.lower()
+            kk = (k or "").lower()
             if kk and kk in text_blob:
                 bonus += 1
         score += min(8, bonus)  # cap
@@ -454,7 +473,10 @@ def main():
 
         if i % 100 == 0 or i == len(candidates):
             elapsed = time.time() - started
-            print(f"⏳ {i}/{len(candidates)} | eventos:{n_events} | geocoded:{n_geocoded} | imgs:{n_imgs} | old_skip:{n_old_skip} | low_score:{n_low_score} | {elapsed:.1f}s")
+            print(
+                f"⏳ {i}/{len(candidates)} | eventos:{n_events} | geocoded:{n_geocoded} | "
+                f"imgs:{n_imgs} | old_skip:{n_old_skip} | low_score:{n_low_score} | {elapsed:.1f}s"
+            )
 
     save_geocode_cache(GEOCODE_CACHE_PATH, geocode_cache)
 
