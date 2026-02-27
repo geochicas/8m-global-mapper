@@ -1,7 +1,3 @@
-rm -f .github/workflows/daily.yml
-mkdir -p .github/workflows
-
-cat > .github/workflows/daily.yml <<'YML'
 name: Daily 8M Global Mapper
 
 on:
@@ -65,7 +61,7 @@ jobs:
             cp -r data/images/* site/images/ || true
           fi
 
-          # Genera index.html simples
+          # Genera index.html simples (root + subdirs)
           python - <<'PY'
           import os
 
@@ -81,6 +77,17 @@ jobs:
               with open(os.path.join(dirpath, "index.html"), "w", encoding="utf-8") as f:
                   f.write("\n".join(html))
 
+          # root index
+          root = "site"
+          html = [
+              "<html><body><h1>8M Global Mapper</h1><ul>",
+              '<li><a href="./exports/">Exports</a></li>',
+              '<li><a href="./images/">Images</a></li>',
+              "</ul></body></html>",
+          ]
+          with open(os.path.join(root, "index.html"), "w", encoding="utf-8") as f:
+              f.write("\n".join(html))
+
           write_index("site/exports", "Exports")
           write_index("site/images", "Images")
           PY
@@ -92,4 +99,3 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
-YML
