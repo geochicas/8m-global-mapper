@@ -1,63 +1,76 @@
-name: 8M Global Scraper Daily
+rm -f .github/workflows/daily.yml
+mkdir -p .github/workflows
+
+cat > .github/workflows/daily.yml <<'YML'
+name: Daily 8M Global Mapper
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: ["main"]
+  workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 9 * * *"
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run scraper
+      - name: Run mapper
+        env:
+          FAST_MODE: "true"
+          MAX_SEEDS: "120"
+          MAX_TOTAL_CANDIDATES: "1800"
+          MAX_PRIORITY: "600"
+          REQUEST_TIMEOUT: "25"
+          MIN_EVENT_DATE: "2025-01-01"
+          # ENABLE_SOCIAL_SEEDS: "false"  # por defecto ya es false
         run: |
           python main.py
 
-      - name: Build static site (exports + images)
+      - name: Prepare site for GitHub Pages
         run: |
           rm -rf site
           mkdir -p site/exports site/images
 
-          cp -v data/exports/*.csv site/exports/ || true
-          cp -v data/images/*.jpg site/images/ || true
-          cp -v data/images/*.jpeg site/images/ || true
-          cp -v data/images/*.png site/images/ || true
+          # Copia exports (si existen)
+          if [ -d "data/exports" ]; then
+            cp -r data/exports/* site/exports/ || true
+          fi
 
-          cat > site/index.html << 'HTML'
-          <html><body>
-            <h1>8M Global Mapper</h1>
-            <ul>
-              <li><a href="./exports/index.html">exports/</a></li>
-              <li><a href="./images/index.html">images/</a></li>
-            </ul>
-          </body></html>
-          HTML
+          # Copia imágenes (si existen)
+          if [ -d "data/images" ]; then
+            cp -r data/images/* site/images/ || true
+          fi
 
-          python - << 'PY'
+          # Genera index.html simples
+          python - <<'PY'
           import os
 
           def write_index(dirpath, title):
+              os.makedirs(dirpath, exist_ok=True)
               items = sorted(os.listdir(dirpath))
               html = [f"<html><body><h1>{title}</h1><ul>"]
               for it in items:
@@ -68,8 +81,6 @@ jobs:
               with open(os.path.join(dirpath, "index.html"), "w", encoding="utf-8") as f:
                   f.write("\n".join(html))
 
-          os.makedirs("site/exports", exist_ok=True)
-          os.makedirs("site/images", exist_ok=True)
           write_index("site/exports", "Exports")
           write_index("site/images", "Images")
           PY
@@ -81,3 +92,4 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
+YML
