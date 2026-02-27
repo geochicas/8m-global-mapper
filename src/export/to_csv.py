@@ -136,14 +136,32 @@ def export_master_csv(path: str, rows: List[dict]) -> str:
 
 def export_umap_csv(path: str, rows: List[dict], min_score: int = 10) -> str:
     rows_n = _normalize_rows(rows)
-    filtered = []
+
+    out = []
+
     for r in rows_n:
-        if not _score_ok(r, min_score):
+        try:
+            if int(r.get("score_relevancia") or 0) < int(min_score):
+                continue
+        except Exception:
             continue
+
         if not (r.get("lat") and r.get("lon")):
             continue
-        filtered.append(r)
-    return export_csv(path, filtered, UMAP_COLUMNS)
+
+        out.append({
+            "lat": r.get("lat"),
+            "lon": r.get("lon"),
+            "name": r.get("convocatoria") or r.get("colectiva"),
+            "description": r.get("descripcion"),
+            "image": r.get("imagen"),
+            "url": r.get("cta_url") or r.get("fuente_url"),
+            "score": r.get("score_relevancia"),
+        })
+
+    columns = ["lat", "lon", "name", "description", "image", "url", "score"]
+
+    return export_csv(path, out, columns)
 
 
 def export_sin_coord_csv(path: str, rows: List[dict], min_score: int = 10) -> str:
