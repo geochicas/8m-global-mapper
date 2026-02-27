@@ -103,9 +103,14 @@ def download_and_process_image(url: str, out_dir: str = "data/images") -> dict |
 
 def _public_url_for_local_path(local_path: str) -> str:
     """
-    Si estás publicando data/images en Pages, esto puede funcionar como ruta relativa.
-    Ajusta aquí si tu Pages publica en otra carpeta.
+    Convierte data/images/xxx.jpg -> images/xxx.jpg
+    para que funcione en GitHub Pages.
     """
-    # normaliza a ruta relativa tipo data/images/xxx.jpg
     lp = local_path.replace("\\", "/")
-    return lp
+
+    if "data/images/" in lp:
+        return lp.split("data/images/")[-1].join(["images/", ""])
+
+    # fallback seguro
+    filename = os.path.basename(lp)
+    return f"images/{filename}"
