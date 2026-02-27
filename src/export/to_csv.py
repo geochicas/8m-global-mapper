@@ -134,34 +134,92 @@ def export_master_csv(path: str, rows: List[dict]) -> str:
     return export_csv(path, rows, MASTER_COLUMNS)
 
 
-def export_umap_csv(path: str, rows: List[dict], min_score: int = 10) -> str:
-    rows_n = _normalize_rows(rows)
+def _abs_pages_url(path_or_url: str) -> str:
+    """
+    Convierte rutas relativas (images/xxx.jpg) a URL absoluta de GitHub Pages.
+    Si ya es http(s), la deja igual.
+    """
+    u = (path_or_url or "").strip()
+    if not u:
+        return ""
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    u = u.lstrip("/")  # por si acaso
+    return f"https://geochicas.github.io/8m-global-mapper/{u}"
 
+
+def _build_umap_description(r: dict) -> str:
+    """
+    Formato uMap wiki (lo que tú estás usando):
+      ## Título
+      YYYY-MM-DD - HH:MM
+      {{https://.../images/...jpg}}
+      [[https://...|Accede a la convocatoria]]
+    """
+    title = (r.get("convocatoria") or "").strip()
+    fecha = (r.get("fecha") or "").strip()
+    hora = (r.get("hora") or "").strip()
+    ciudad = (r.get("ciudad") or "").strip()
+    pais = (r.get("pais") or "").strip()
+
+    when = ""
+    if fecha and hora:
+        when = f"{fecha} - {hora}"
+    elif fecha:
+        when = fecha
+    elif hora:
+        when = hora
+
+    # imagen: aceptar "images/..." o URL ya absoluta
+    img = (r.get("imagen") or "").strip()
+    img_abs = _abs_pages_url(img) if img else ""
+
+    # link: preferimos cta_url, si no fuente_url
+    link = (r.get("cta_url") or r.get("fuente_url") or "").strip()
+
+    lines = []
+    if title:
+        lines.append(f"## {title}")
+    # ubicación en 1 línea (suave, sin inventar)
+    place_bits = " · ".join([x for x in [ciudad, pais] if x])
+    if place_bits:
+        lines.append(place_bits)
+    if when:
+        lines.append(when)
+    if img_abs:
+        lines.append(f"{{{{{img_abs}}}}}")  # {{...}} literal
+    if link:
+        lines.append(f"[[{link}|Accede a la convocatoria]]")
+
+    return "\n".join(lines).strip()
+
+
+def export_umap_csv(path: str, rows: List[dict], min_score: int = 10) -> str:
+    """
+    Export uMap-friendly:
+      - name: título del punto
+      - description: popup en wiki uMap (con {{img}} y [[link|text]])
+      - lat/lon: coordenadas
+    """
+    rows_n = _normalize_rows(rows)
     out = []
 
     for r in rows_n:
-        try:
-            if int(r.get("score_relevancia") or 0) < int(min_score):
-                continue
-        except Exception:
+        if not _score_ok(r, min_score):
             continue
-
         if not (r.get("lat") and r.get("lon")):
             continue
 
-        out.append({
-            "lat": r.get("lat"),
-            "lon": r.get("lon"),
-            "name": r.get("convocatoria") or r.get("colectiva"),
-            "description": r.get("descripcion"),
-            "image": r.get("imagen"),
-            "url": r.get("cta_url") or r.get("fuente_url"),
-            "score": r.get("score_relevancia"),
-        })
+        item = {
+            "name": (r.get("convocatoria") or "").strip(),
+            "description": _build_umap_description(r),
+            "lat": r.get("lat", ""),
+            "lon": r.get("lon", ""),
+        }
+        out.append(item)
 
-    columns = ["lat", "lon", "name", "description", "image", "url", "score"]
-
-    return export_csv(path, out, columns)
+    # columnas explícitas para estabilidad
+    return export_csv(path, out, ["name", "description", "lat", "lon"])
 
 
 def export_sin_coord_csv(path: str, rows: List[dict], min_score: int = 10) -> str:
