@@ -37,10 +37,10 @@ jobs:
       - name: Run mapper
         env:
           FAST_MODE: "true"
-          MAX_SEEDS: "120"
-          MAX_TOTAL_CANDIDATES: "1800"
-          MAX_PRIORITY: "600"
-          REQUEST_TIMEOUT: "25"
+          MAX_SEEDS: "60"
+          MAX_TOTAL_CANDIDATES: "900"
+          MAX_PRIORITY: "400"
+          REQUEST_TIMEOUT: "15"
           MIN_EVENT_DATE: "2025-01-01"
           # ENABLE_SOCIAL_SEEDS: "false"  # por defecto ya es false
         run: |
