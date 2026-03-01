@@ -1,4 +1,4 @@
-# main.py — 8m-global-mapper
+# main.py — 8m-global-mapper (estable y coherente)
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from urllib.parse import urlparse, urljoin
 
 import yaml
 
-# --- módulos del repo ---
 from src.collect.web_fetch import make_session, fetch_url
 from src.collect.discover_links import extract_links, same_domain
 from src.parse.html_parser import parse_page
@@ -88,64 +87,46 @@ def dedupe(items: list[str]) -> list[str]:
     return out
 
 
-def _canon_seed_prefix(u: str) -> str:
-    u=strip_fragment(u)
-    try:
-        p=urlparse(u)
-        host=(p.netloc or "").lower()
-        if host.startswith("www."):
-            host=host[4:]
-        path=(p.path or "/")
-        if not path.startswith("/"):
-            path="/"+path
-        return host+path
-    except:
+def normalize(s: str) -> str:
+    if not s:
         return ""
+    s=str(s).replace("\u00a0"," ")
+    s=re.sub(r"\s+"," ",s).strip()
+    return s
 
 
-def _canon_url(u:str)->str:
-    return _canon_seed_prefix(u)
+# =========================
+# Domain rules FIXED
+# =========================
+def load_domain_rules() -> dict:
+    if not os.path.exists(DOMAIN_RULES_YML):
+        return {}
+    with open(DOMAIN_RULES_YML,"r",encoding="utf-8") as f:
+        y=yaml.safe_load(f)
+        return y if isinstance(y,dict) else {}
 
 
-def _assign_meta_by_seed_prefix(url:str, seed_meta:dict[str,dict])->tuple[str,list[str]]:
-    ukey=_canon_url(url)
-    matches=[]
-    for s,meta in (seed_meta or {}).items():
-        skey=_canon_seed_prefix(s)
-        if ukey.startswith(skey):
-            matches.append((len(skey),meta or {}))
-    if not matches:
-        return ("",[])
-    matches.sort(key=lambda x:x[0], reverse=True)
-    region=""
-    temas=[]
-    seen=set()
-    for _,meta in matches:
-        r=meta.get("region","")
-        if r and not region:
-            region=r
-        for t in meta.get("temas",[]):
-            if t and t not in seen:
-                seen.add(t)
-                temas.append(t)
-    return (region,temas)
+def url_allowed_by_rules(rules: dict, url: str) -> bool:
+    if not rules:
+        return True
 
+    u=(url or "").lower()
 
-def _extract_image_from_html(html:str)->str:
-    if not html:
-        return ""
-    m=re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',html,re.I)
-    if m:
-        return m.group(1).strip()
-    m=re.search(r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',html,re.I)
-    if m:
-        return m.group(1).strip()
-    for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']',html,re.I):
-        src=m.group(1).strip()
-        if any(x in src.lower() for x in ["favicon","logo","icon","sprite","data:image"]):
-            continue
-        return src
-    return ""
+    global_rules = rules.get("global", {}) if isinstance(rules.get("global"),dict) else {}
+
+    deny = global_rules.get("deny_url_contains", [])
+    for pat in deny:
+        if isinstance(pat,str) and pat.lower() in u:
+            return False
+
+    allow = global_rules.get("allow_url_contains", [])
+    if allow:
+        for pat in allow:
+            if isinstance(pat,str) and pat.lower() in u:
+                return True
+        return False
+
+    return True
 
 
 # =========================
@@ -196,6 +177,8 @@ def crawl_seed_bfs(session, seed, rules, depth, max_pages, global_seen, global_o
         local_seen.add(u)
         if not same_domain(seed,u):
             continue
+        if not url_allowed_by_rules(rules,u):
+            continue
         if u not in global_seen:
             global_seen.add(u)
             global_out.append(u)
@@ -213,11 +196,47 @@ def crawl_seed_bfs(session, seed, rules, depth, max_pages, global_seen, global_o
 
 
 # =========================
+# Popup builder
+# =========================
+def build_umap_popup(ev: dict) -> str:
+    titulo = normalize(ev.get("convocatoria") or ev.get("colectiva") or "")
+    fecha = normalize(ev.get("fecha") or "")
+    hora = normalize(ev.get("hora") or "")
+
+    when=""
+    if fecha and hora:
+        when=f"{fecha} - {hora}"
+    elif fecha:
+        when=fecha
+    elif hora:
+        when=hora
+
+    lines=[]
+    if titulo:
+        lines.append(f"## {titulo}")
+    if when:
+        lines.append(when)
+
+    img=normalize(ev.get("imagen") or "")
+    if img:
+        if img.startswith("images/"):
+            img=f"https://geochicas.github.io/8m-global-mapper/{img}"
+        lines.append(f"{{{{{img}}}}}")
+
+    cta=normalize(ev.get("cta_url") or "")
+    if cta.startswith("http"):
+        lines.append(f"[[{cta}|Accede a la convocatoria]]")
+
+    return "\n".join(lines).strip()
+
+
+# =========================
 # MAIN
 # =========================
 def main():
     ensure_dirs()
     session=make_session(timeout=REQUEST_TIMEOUT)
+    rules=load_domain_rules()
 
     seeds,priority,hashtags,seed_meta=read_sources_merged()
 
@@ -230,7 +249,7 @@ def main():
 
     for u in priority[:MAX_PRIORITY]:
         u=strip_fragment(u)
-        if u and u not in seen:
+        if u and u not in seen and url_allowed_by_rules(rules,u):
             seen.add(u)
             candidates.append(u)
 
@@ -238,7 +257,7 @@ def main():
         if len(candidates)>=MAX_TOTAL_CANDIDATES:
             break
         picked=crawl_seed_bfs(
-            session,seed,{},CRAWL_DEPTH,
+            session,seed,rules,CRAWL_DEPTH,
             MAX_PAGES_PER_SEED,
             seen,candidates,MAX_TOTAL_CANDIDATES
         )
@@ -251,8 +270,9 @@ def main():
     geocode_cache=load_geocode_cache(GEOCODE_CACHE_PATH)
 
     n_imgs=0
-    n_old_skip=0
+    n_geocoded=0
     n_low_score=0
+    n_old_skip=0
 
     for url in candidates:
         html=fetch_url(session,url,use_cache=True)
@@ -265,32 +285,40 @@ def main():
             continue
 
         score=int(ev.get("score_relevancia") or 0)
-
-        f=(ev.get("fecha") or "").strip()
-        if f:
-            try:
-                dd=date.fromisoformat(f)
-                ev["anio"]=str(dd.year)
-                if dd<MIN_EVENT_DATE:
-                    n_old_skip+=1
-                    continue
-            except:
-                ev["anio"]=""
-
         if score<THRESHOLD_EXTRACT:
             n_low_score+=1
             continue
 
-        region,temas=_assign_meta_by_seed_prefix(url,seed_meta)
-        ev["region"]=region
-        ev["temas"]="; ".join(temas) if temas else "Sin tema detectado"
+        # fecha mínima
+        f=(ev.get("fecha") or "").strip()
+        if f:
+            try:
+                dd=date.fromisoformat(f)
+                if dd<MIN_EVENT_DATE:
+                    n_old_skip+=1
+                    continue
+                ev["anio"]=str(dd.year)
+            except:
+                pass
 
-        img_url=ev.get("imagen") or ""
+        # geocode RESTAURADO
+        geo=geocode_event(ev,geocode_cache=geocode_cache)
+        if geo and geo.get("lat") and geo.get("lon"):
+            ev["lat"]=geo["lat"]
+            ev["lon"]=geo["lon"]
+            n_geocoded+=1
+
+        # imagen fallback
+        img_url=(ev.get("imagen") or "").strip()
         if not img_url:
-            img_url=_extract_image_from_html(html)
+            m=re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',html,re.I)
+            if m:
+                img_url=m.group(1).strip()
 
         if img_url:
             img_abs=urljoin(url,img_url)
+            if img_abs.startswith("//"):
+                img_abs="https:"+img_abs
             if img_abs.startswith("http"):
                 out=download_and_process_image(img_abs,out_dir=IMAGES_DIR)
                 if out and out.get("public_url"):
@@ -301,14 +329,18 @@ def main():
 
     save_geocode_cache(GEOCODE_CACHE_PATH,geocode_cache)
 
+    for r in records:
+        r["popup"]=build_umap_popup(r)
+
     export_master_csv(EXPORT_MASTER,records)
     export_umap_csv(EXPORT_UMAP,records,min_score=THRESHOLD_EXPORT_UMAP)
     export_sin_coord_csv(EXPORT_SIN_COORD,records,min_score=THRESHOLD_EXPORT_UMAP)
 
     print("")
     print(f"🧾 Eventos master: {len(records)}")
-    print(f"🗑️  Filtrados por fecha: {n_old_skip}")
     print(f"🧠 Skipped low score: {n_low_score}")
+    print(f"🗑️ Filtrados por fecha: {n_old_skip}")
+    print(f"📍 Geocoded: {n_geocoded}")
     print(f"🖼️ imágenes descargadas: {n_imgs}")
 
 
