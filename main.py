@@ -247,7 +247,7 @@ def crawl_seed_bfs(session, seed, rules, depth, max_pages, global_seen, global_o
 # Popup builder
 # =========================
 def build_umap_popup(ev: dict) -> str:
-    titulo = normalize(ev.get("convocatoria") or ev.get("colectiva") or "")
+    titulo = normalize(ev.get("colectiva") or ev.get("convocatoria") or "")
     fecha = normalize(ev.get("fecha") or "")
     hora = normalize(ev.get("hora") or "")
 
