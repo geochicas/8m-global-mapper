@@ -1,62 +1,119 @@
 # config/sources.yml
 # Fuentes para 8m-global-mapper
-#
-# Campos por nodo de tema:
-#   urls:           lista de seeds a crawlear
-#   ciudad_default: ciudad asignada a eventos sin ciudad detectada
-#   pais_default:   país asignado a eventos sin país detectado
-#   hashtags:       hashtags asociados (opcional)
-#   social:         redes sociales (NO se scrapea por defecto)
 
+# config/sources.yml
 seeds:
   "Europa":
 
-    "Violencias":
-      ciudad_default: ""
-      pais_default: ""
-      urls:
-        - https://hacialahuelgafeminista.org
-        - https://www.feministas.org
-        - https://movimientofeministamadrid.org
-        - https://collectif-noustoutes.org
-        - https://osezlefeminisme.fr
-        - https://feministfightback.org.uk
-        - https://sistersuncut.org
-        - https://womensgrid.org.uk
-        - https://plataformamulheres.org.pt
-        - https://umar.pt
-        - https://nonunadimeno.wordpress.com
-        - https://nudmtrieste.noblogs.org
-        - https://frauenstreik.org
-        - https://www.frauen-gegen-gewalt.de
-        - https://femmes-solidaires.org
-        - https://feministes.cat
-        - https://assemblea8m.cat
-        - https://www.feminicidio.net
-      hashtags:
-        - "#8M2026"
-        - "#HuelgaFeminista"
-      social: []
-
-    "Cuidados y trabajo":
-      ciudad_default: ""
+    "Violencias_ES_Madrid":
+      ciudad_default: "Madrid"
       pais_default: "España"
       urls:
-        - https://www.ccoo.es
-        - https://www.cgt.es
-        - https://sindicatodeestudiantes.net
+        - https://hacialahuelgafeminista.org
+        - https://movimientofeministamadrid.org
       hashtags: []
       social: []
 
-    "Derechos digitales":
+    "Violencias_ES_Barcelona":
       ciudad_default: "Barcelona"
       pais_default: "España"
       urls:
+        - https://assemblea8m.cat
+        - https://feministes.cat
         - https://canodrom.barcelona/es
       hashtags: []
       social: []
 
+    "Violencias_ES_multiciudad":
+      ciudad_default: ""
+      pais_default: "España"
+      urls:
+        - https://www.feministas.org
+        - https://www.ccoo.es
+        - https://www.cgt.es
+        - https://sindicatodeestudiantes.net
+        - https://www.feminicidio.net
+      hashtags: []
+      social: []
+
+    "Violencias_FR":
+      ciudad_default: "París"
+      pais_default: "Francia"
+      urls:
+        - https://collectif-noustoutes.org
+        - https://osezlefeminisme.fr
+        - https://grevefeministe.fr
+        - https://femmes-solidaires.org
+      hashtags: []
+      social: []
+
+    "Violencias_UK":
+      ciudad_default: "Londres"
+      pais_default: "Reino Unido"
+      urls:
+        - https://feministfightback.org.uk
+        - https://sistersuncut.org
+        - https://womankind.org.uk
+      hashtags: []
+      social: []
+
+    "Violencias_UK_Belfast":
+      ciudad_default: "Belfast"
+      pais_default: "Reino Unido"
+      urls:
+        - https://womensgrid.org.uk
+      hashtags: []
+      social: []
+
+    "Violencias_PT":
+      ciudad_default: "Lisboa"
+      pais_default: "Portugal"
+      urls:
+        - https://umar.pt
+        - https://plataformamulheres.org.pt
+      hashtags: []
+      social: []
+
+    "Violencias_IT_Roma":
+      ciudad_default: "Roma"
+      pais_default: "Italia"
+      urls:
+        - https://nonunadimeno.wordpress.com
+      hashtags: []
+      social: []
+
+    "Violencias_IT_Trieste":
+      ciudad_default: "Trieste"
+      pais_default: "Italia"
+      urls:
+        - https://nudmtrieste.noblogs.org
+      hashtags: []
+      social: []
+
+    "Violencias_CH":
+      ciudad_default: "Zürich"
+      pais_default: "Suiza"
+      urls:
+        - https://frauenstreik.org
+      hashtags: []
+      social: []
+
+    "Violencias_DE":
+      ciudad_default: "Berlín"
+      pais_default: "Alemania"
+      urls:
+        - https://www.frauen-gegen-gewalt.de
+      hashtags: []
+      social: []
+
     "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Cuidados y trabajo":
       ciudad_default: ""
       pais_default: ""
       urls: []
@@ -100,7 +157,31 @@ seeds:
 
   "Africa":
 
-    "Violencias":
+    "Violencias_ZA_Johannesburgo":
+      ciudad_default: "Johannesburgo"
+      pais_default: "Sudáfrica"
+      urls:
+        - https://genderlinks.org.za
+      hashtags: []
+      social: []
+
+    "Violencias_ZA_CapeTown":
+      ciudad_default: "Ciudad del Cabo"
+      pais_default: "Sudáfrica"
+      urls:
+        - https://womensnet.org.za
+      hashtags: []
+      social: []
+
+    "Violencias_NG":
+      ciudad_default: "Lagos"
+      pais_default: "Nigeria"
+      urls:
+        - https://wacol.org
+      hashtags: []
+      social: []
+
+    "Violencias_AF_multiciudad":
       ciudad_default: ""
       pais_default: ""
       urls:
@@ -109,17 +190,7 @@ seeds:
         - https://africanfeminism.com
         - https://feministafrica.net
         - https://baobabwomen.org
-        - https://wacol.org
-        - https://genderlinks.org.za
-        - https://womensnet.org.za
         - https://femnet.org
-      hashtags: []
-      social: []
-
-    "Antirracismo":
-      ciudad_default: ""
-      pais_default: ""
-      urls: []
       hashtags: []
       social: []
 
@@ -131,6 +202,13 @@ seeds:
       social: []
 
     "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Antirracismo":
       ciudad_default: ""
       pais_default: ""
       urls: []
@@ -167,9 +245,9 @@ seeds:
 
   "America Norte":
 
-    "Violencias":
+    "Violencias_US":
       ciudad_default: ""
-      pais_default: ""
+      pais_default: "Estados Unidos"
       urls:
         - https://www.womensmarch.com
         - https://feministfrequency.com
@@ -321,9 +399,7 @@ seeds:
         - https://www.niunamenos.ar/8m
         - https://feim.org.ar
         - https://www.agenciapresentes.org
-      hashtags:
-        - "#NiUnaMenos"
-        - "#8M2026"
+      hashtags: []
       social: []
 
     "Violencias_CL":
@@ -331,17 +407,23 @@ seeds:
       pais_default: "Chile"
       urls:
         - https://cf8m.cl
-      hashtags:
-        - "#HuelgaFeminista"
+      hashtags: []
       social: []
 
-    "Violencias_BR":
+    "Violencias_BR_Brasilia":
       ciudad_default: "Brasilia"
       pais_default: "Brasil"
       urls:
         - https://marchadasmulheresnegras.com.br
-        - https://sof.org.br
         - https://cfemea.org.br
+      hashtags: []
+      social: []
+
+    "Violencias_BR_SaoPaulo":
+      ciudad_default: "São Paulo"
+      pais_default: "Brasil"
+      urls:
+        - https://sof.org.br
         - https://articulacaodemulheres.org.br
       hashtags: []
       social: []
@@ -492,14 +574,28 @@ seeds:
 
   "Oceania":
 
-    "Violencias_AU":
+    "Violencias_AU_Adelaide":
       ciudad_default: "Adelaide"
       pais_default: "Australia"
       urls:
         - https://wwcsa.org.au
+      hashtags: []
+      social: []
+
+    "Violencias_AU_Sydney":
+      ciudad_default: "Sydney"
+      pais_default: "Australia"
+      urls:
         - https://ieu.asn.au
-        - https://wel.org.au
         - https://unwomen.org.au
+      hashtags: []
+      social: []
+
+    "Violencias_AU_Canberra":
+      ciudad_default: "Canberra"
+      pais_default: "Australia"
+      urls:
+        - https://wel.org.au
       hashtags: []
       social: []
 
