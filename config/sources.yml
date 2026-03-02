@@ -1,279 +1,584 @@
 # config/sources.yml
-# Última revisión: marzo 2026
-# Criterio: solo organizaciones que convocan eventos o publican agendas.
-# NO medios de análisis ni redes sociales.
+# Fuentes para 8m-global-mapper
 #
-# Leyenda:
-#   [NUEVO]     = agregado en este batch
-#   [REEMPLAZA] = sustituye URL anterior
-#   [VERIFICAR] = activo pero con contenido variable
+# Campos por nodo de tema:
+#   urls:           lista de seeds a crawlear
+#   ciudad_default: ciudad asignada a eventos sin ciudad detectada
+#   pais_default:   país asignado a eventos sin país detectado
+#   hashtags:       hashtags asociados (opcional)
+#   social:         redes sociales (NO se scrapea por defecto)
 
 seeds:
-
-  # ══════════════════════════════════════════════════════════════
   "Europa":
-  # ══════════════════════════════════════════════════════════════
 
     "Violencias":
+      ciudad_default: ""
+      pais_default: ""
       urls:
-        # España — coordinadoras con sección de convocatorias
         - https://hacialahuelgafeminista.org
-        - https://movimientofeministamadrid.org
         - https://www.feministas.org
-        - https://feministas.org/convocatorias-8-de-marzo-2025-dia.html
-        - https://assemblea8m.cat
-        - https://feministes.cat
-        - https://www.ccoo.es
-        - https://www.cgt.es
-        - https://www.sindicatodeestudiantes.net
-        - https://www.cntvalladolid.es
-
-        # Italia
-        - https://nonunadimeno.wordpress.com      # [REEMPLAZA nonunadimeno.it]
+        - https://movimientofeministamadrid.org
+        - https://collectif-noustoutes.org
+        - https://osezlefeminisme.fr
+        - https://feministfightback.org.uk
+        - https://sistersuncut.org
+        - https://womensgrid.org.uk
+        - https://plataformamulheres.org.pt
+        - https://umar.pt
+        - https://nonunadimeno.wordpress.com
         - https://nudmtrieste.noblogs.org
-        - https://www.udigrazia.it                # [NUEVO]
-        - https://8mitalia.wordpress.com
-
-        # Francia
-        - https://www.grevefeministe.fr
-        - https://www.collectif-noustoutes.org    # [NUEVO]
-        - https://www.osezlefeminisme.fr          # [NUEVO]
-        - https://www.femmes-solidaires.org
-
-        # Alemania
         - https://frauenstreik.org
         - https://www.frauen-gegen-gewalt.de
-        - https://www.frauenrat.de                # [NUEVO]
-
-        # Portugal
-        - https://www.plataformamulheres.org.pt   # [NUEVO]
-        - https://www.umar.pt                     # [NUEVO]
-
-        # Reino Unido
-        - https://feministfightback.org.uk        # [NUEVO]
-        - https://www.sistersuncut.org            # [NUEVO]
-        - https://www.womensgrid.org.uk           # [NUEVO]
-
-        # Espacios mixtos Europa
-        - https://www.canodrom.barcelona
-        - https://www.ayto-caceres.es
-        - https://www.chayn.co
-
-      hashtags:
-        - "#8M2026"
-        - "#8M"
-        - "#HuelgaFeminista"
-        - "#FeministStrike"
-        - "#GreveFeministe"
-        - "#Frauenstreik"
-        - "#NonUnaDiMeno"
-      social: []
-
-
-  # ══════════════════════════════════════════════════════════════
-  "America Sur":
-  # ══════════════════════════════════════════════════════════════
-
-    "Violencias":
-      urls:
-        # Argentina
-        - https://www.niunamenos.ar/8m            # [REEMPLAZA /acciones]
-        - https://www.feim.org.ar                 # [NUEVO]
-
-        # Chile
-        - https://cf8m.cl                         # [NUEVO]
-
-        # Brasil
-        - https://marchadasmulheresnegras.com.br  # [NUEVO] verificado activo
-        - https://www.sof.org.br                  # [NUEVO]
-        - https://www.cfemea.org.br               # [NUEVO]
-        - https://www.articulacaodemulheres.org.br # [NUEVO]
-        - https://marchamulheres.wordpress.com/category/mobilizacao
-
-        # Perú
-        - https://www.flora.org.pe                # [NUEVO]
-        - https://www.demuspe.org                 # [NUEVO]
-
-        # Bolivia
-        - https://www.coordinadoradelamujer.org.bo # [NUEVO]
-        - https://www.mujerescreando.org
-
-        # Colombia
-        - https://www.rednacionaldemujeres.org    # [NUEVO]
-        - https://www.humanas.org.co              # [NUEVO]
-
-        # Regionales
-        - https://www.agenciapresentes.org
-        - https://www.latfem.org
+        - https://femmes-solidaires.org
+        - https://feministes.cat
+        - https://assemblea8m.cat
         - https://www.feminicidio.net
-        - https://www.calala.org
-        - https://www.cladem.org
-
       hashtags:
         - "#8M2026"
-        - "#NiUnaMenos"
         - "#HuelgaFeminista"
-        - "#ParoFeminista"
-        - "#MareaFeminista"
       social: []
 
-
-  # ══════════════════════════════════════════════════════════════
-  "America Centro":
-  # ══════════════════════════════════════════════════════════════
-
-    "Violencias":
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: "España"
       urls:
-        # Costa Rica — la más activa de la región, espacio cívico abierto
-        - https://www.cefemina.com                # [NUEVO] CEFEMINA Costa Rica (verificado activo)
-        - https://ccecr.org                       # [NUEVO] Centro Cultural España CR — convoca 8M
-
-        # El Salvador
-        - https://ormusa.org                      # [NUEVO] ORMUSA El Salvador
-        - https://ormusa.org/category/noticias    # [NUEVO] sección noticias ORMUSA
-
-        # Honduras
-        - https://derechosdelamujer.org           # [NUEVO] CDM Honduras (verificado activo)
-
-        # México
-        - https://www.gire.org.mx                 # [NUEVO] GIRE México — derechos reproductivos
-        - https://asilegal.org.mx                 # [NUEVO] Asilegal CDMX
-        - https://www.mujeresenlared.net
-        - https://www.pikaramagazine.com
-
-        # Nota: Nicaragua sin organizaciones con web activa (represión estatal)
-        # Guatemala: organizaciones operan con baja visibilidad digital
-
-      hashtags:
-        - "#8M2026"
-        - "#FeminismoCentroamericano"
-        - "#NiUnaMenos"
-        - "#HuelgaFeminista"
+        - https://www.ccoo.es
+        - https://www.cgt.es
+        - https://sindicatodeestudiantes.net
+      hashtags: []
       social: []
 
+    "Derechos digitales":
+      ciudad_default: "Barcelona"
+      pais_default: "España"
+      urls:
+        - https://canodrom.barcelona/es
+      hashtags: []
+      social: []
 
-  # ══════════════════════════════════════════════════════════════
-  "America Norte":
-  # ══════════════════════════════════════════════════════════════
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+  "Africa":
 
     "Violencias":
+      ciudad_default: ""
+      pais_default: ""
+      urls:
+        - https://awdf.org
+        - https://womin.africa
+        - https://africanfeminism.com
+        - https://feministafrica.net
+        - https://baobabwomen.org
+        - https://wacol.org
+        - https://genderlinks.org.za
+        - https://womensnet.org.za
+        - https://femnet.org
+      hashtags: []
+      social: []
+
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+  "America Norte":
+
+    "Violencias":
+      ciudad_default: ""
+      pais_default: ""
       urls:
         - https://www.womensmarch.com
-        - https://www.codepink.org
         - https://feministfrequency.com
         - https://www.msmagazine.com
-        - https://www.the19thnews.org
-        - https://www.madre.org
-        - https://www.equalitynow.org
-
-      hashtags:
-        - "#IWD2026"
-        - "#WomensDay"
-        - "#FeministStrike"
+      hashtags: []
       social: []
 
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
 
-  # ══════════════════════════════════════════════════════════════
-  "Africa":
-  # ══════════════════════════════════════════════════════════════
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
 
-    "Violencias":
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+  "America Centro":
+
+    "Violencias_CR":
+      ciudad_default: "San José"
+      pais_default: "Costa Rica"
       urls:
-        # Pan-africanas
-        - https://www.femnet.org                  # FEMNET — Red Feminista Africana
-        - https://awdf.org                        # [NUEVO] African Women's Development Fund
-        - https://womin.africa                    # [NUEVO] WoMin — mujeres y extractivismo
-        - https://africanfeminism.com             # [NUEVO] African Feminism — plataforma digital
-        - https://feministafrica.net              # [NUEVO] Feminist Africa
-
-        # Kenya
-        - https://www.akibauhaki.org
-
-        # Nigeria
-        - https://www.baobabwomen.org             # [NUEVO]
-        - https://www.wacol.org                   # [NUEVO]
-
-        # Sudáfrica
-        - https://www.genderlinks.org.za          # [NUEVO]
-        - https://www.womensnet.org.za            # [NUEVO]
-
-        # Internacionales con fuerte programa África
-        - https://www.awid.org
-        - https://www.womankind.org.uk
-        - https://www.apwld.org
-
-      hashtags:
-        - "#IWD2026"
-        - "#AfricanFeminism"
-        - "#8March"
-        - "#EndGBV"
+        - https://cefemina.com
+        - https://ccecr.org
+      hashtags: []
       social: []
 
+    "Violencias_SV":
+      ciudad_default: "San Salvador"
+      pais_default: "El Salvador"
+      urls:
+        - https://ormusa.org
+        - https://ormusa.org/category/noticias
+      hashtags: []
+      social: []
 
-  # ══════════════════════════════════════════════════════════════
+    "Violencias_HN":
+      ciudad_default: "Tegucigalpa"
+      pais_default: "Honduras"
+      urls:
+        - https://derechosdelamujer.org
+      hashtags: []
+      social: []
+
+    "Violencias_MX":
+      ciudad_default: "Ciudad de México"
+      pais_default: "México"
+      urls:
+        - https://gire.org.mx
+        - https://asilegal.org.mx
+      hashtags: []
+      social: []
+
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+  "America Sur":
+
+    "Violencias_AR":
+      ciudad_default: "Buenos Aires"
+      pais_default: "Argentina"
+      urls:
+        - https://www.niunamenos.ar/8m
+        - https://feim.org.ar
+        - https://www.agenciapresentes.org
+      hashtags:
+        - "#NiUnaMenos"
+        - "#8M2026"
+      social: []
+
+    "Violencias_CL":
+      ciudad_default: "Santiago"
+      pais_default: "Chile"
+      urls:
+        - https://cf8m.cl
+      hashtags:
+        - "#HuelgaFeminista"
+      social: []
+
+    "Violencias_BR":
+      ciudad_default: "Brasilia"
+      pais_default: "Brasil"
+      urls:
+        - https://marchadasmulheresnegras.com.br
+        - https://sof.org.br
+        - https://cfemea.org.br
+        - https://articulacaodemulheres.org.br
+      hashtags: []
+      social: []
+
+    "Violencias_PE":
+      ciudad_default: "Lima"
+      pais_default: "Perú"
+      urls:
+        - https://flora.org.pe
+        - https://demuspe.org
+      hashtags: []
+      social: []
+
+    "Violencias_BO":
+      ciudad_default: "La Paz"
+      pais_default: "Bolivia"
+      urls:
+        - https://coordinadoradelamujer.org.bo
+        - https://mujerescreando.org
+      hashtags: []
+      social: []
+
+    "Violencias_CO":
+      ciudad_default: "Bogotá"
+      pais_default: "Colombia"
+      urls:
+        - https://rednacionaldemujeres.org
+        - https://humanas.org.co
+      hashtags: []
+      social: []
+
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
   "Asia":
-  # ══════════════════════════════════════════════════════════════
 
-    "Violencias":
+    "Violencias_PH":
+      ciudad_default: "Manila"
+      pais_default: "Filipinas"
       urls:
-        # Filipinas
-        - https://www.gabriela.ph                 # [NUEVO] GABRIELA — convoca 8M históricamente
-        - https://www.apwld.org
-
-        # India y Sur de Asia
-        - https://feminisminindia.com             # [NUEVO]
-        - https://www.sangatsouthasia.org         # [NUEVO]
-
-        # Internacional con programa Asia
-        - https://www.womankind.org.uk
-
-      hashtags:
-        - "#IWD2026"
-        - "#FeministStrike"
-        - "#8March"
+        - https://gabriela.ph
+      hashtags: []
       social: []
 
+    "Violencias_IN":
+      ciudad_default: "Nueva Delhi"
+      pais_default: "India"
+      urls:
+        - https://feminisminindia.com
+        - https://sangatsouthasia.org
+      hashtags: []
+      social: []
 
-  # ══════════════════════════════════════════════════════════════
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
   "Oceania":
-  # ══════════════════════════════════════════════════════════════
 
-    "Violencias":
+    "Violencias_AU":
+      ciudad_default: "Adelaide"
+      pais_default: "Australia"
       urls:
-        # Australia — sindicatos y centros laborales son los más activos en 8M
-        - https://wwcsa.org.au                    # [NUEVO] Working Women's Centre SA — marcha 8M
-        - https://www.ieu.asn.au/international-womens-day  # [NUEVO] IEU NSW — eventos IWD 2026
-        - https://www.wel.org.au                  # [NUEVO] Women's Electoral Lobby Australia
-        - https://unwomen.org.au                  # [NUEVO] UN Women Australia
-
-        # Nueva Zelanda
-        - https://womensmarch.co.nz               # [NUEVO] Women's March Aotearoa NZ
-        - https://www.ncwnz.org.nz                # [NUEVO] National Council Women NZ
-
-      hashtags:
-        - "#IWD2026"
-        - "#8March"
-        - "#FeministMarch"
-        - "#WomensDay"
+        - https://wwcsa.org.au
+        - https://ieu.asn.au
+        - https://wel.org.au
+        - https://unwomen.org.au
+      hashtags: []
       social: []
 
+    "Violencias_NZ":
+      ciudad_default: "Wellington"
+      pais_default: "Nueva Zelanda"
+      urls:
+        - https://womensmarch.co.nz
+        - https://ncwnz.org.nz
+      hashtags: []
+      social: []
 
-# ══════════════════════════════════════════════════════════════
-# PRIORITY URLS
-# Se procesan primero en cada run.
-# ══════════════════════════════════════════════════════════════
+    "Transfeminismos":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Cuidados y trabajo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Antirracismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Feminicidios / femicidios":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "LGBTIQ+":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Indigenismo":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
+    "Defensa territorial":
+      ciudad_default: ""
+      pais_default: ""
+      urls: []
+      hashtags: []
+      social: []
+
 priority_urls:
   - https://hacialahuelgafeminista.org
-  - https://feministas.org/convocatorias-8-de-marzo-2025-dia.html
   - https://assemblea8m.cat
   - https://cf8m.cl
   - https://nonunadimeno.wordpress.com
   - https://marchadasmulheresnegras.com.br
-  - https://www.collectif-noustoutes.org
+  - https://collectif-noustoutes.org
   - https://feministfightback.org.uk
-  - https://wwcsa.org.au/events/iwd-march
+  - https://wwcsa.org.au
   - https://womensmarch.co.nz
-  - https://www.gabriela.ph
+  - https://gabriela.ph
   - https://ormusa.org/category/noticias
   - https://derechosdelamujer.org
   - https://ccecr.org
+  - https://grevefeministe.fr
+  - https://frauenstreik.org
+  - https://movimientofeministamadrid.org
+  - https://cefemina.com
+  - https://flora.org.pe
+  - https://coordinadoradelamujer.org.bo
+  - https://rednacionaldemujeres.org
